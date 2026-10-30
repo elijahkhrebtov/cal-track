@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   ChevronRight,
@@ -14,6 +15,11 @@ import {
 } from "lucide-react";
 
 import { request } from "@/components/api";
+import {
+  discardDrafts,
+  useDraftStore,
+  usePageDraft,
+} from "@/components/drafts";
 import { FoodListSkeleton } from "@/components/loading";
 import {
   FoodPageLoader,
@@ -24,7 +30,13 @@ import {
 import { ErrorNotice, Field, FoodForm, SavingLabel } from "@/components/forms";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sheet } from "@/components/ui/sheet";
+import {
+  WorkflowPage,
+  datedPath,
+  goBack,
+  navigate,
+  returnTo,
+} from "@/components/workflow-page";
 import { scaleNutrients, sumNutrients } from "@/lib/nutrition";
 import type { Food, Meal, MealEntry, Nutrients } from "@/lib/types";
 
@@ -121,11 +133,13 @@ export function FoodRow({
 function FoodSearch({
   onSelect,
   onCustom,
+  draftKey,
 }: {
   onSelect: (food: Food) => Promise<void>;
   onCustom: () => void;
+  draftKey: string;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = usePageDraft(`${draftKey}/query`, () => "");
   const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -322,9 +336,11 @@ function FoodDetails({
   food,
   entry,
   onConfirm,
+  draftKey,
 }: {
   food: Food;
   entry?: MealEntry;
+  draftKey: string;
   onConfirm: (values: {
     grams: number;
     quantity: number;
@@ -335,8 +351,8 @@ function FoodDetails({
     (serving) => serving.name === entry?.servingName,
   );
   const initialUnit = matchingServing ? matchingServing.id : "g";
-  const [unit, setUnit] = useState(initialUnit);
-  const [amount, setAmount] = useState(
+  const [unit, setUnit] = usePageDraft(`${draftKey}/unit`, () => initialUnit);
+  const [amount, setAmount] = usePageDraft(`${draftKey}/amount`, () =>
     entry
       ? (initialUnit === "g" ? entry.grams : entry.quantity).toString()
       : "100",
@@ -416,40 +432,95 @@ function FoodDetails({
   );
 }
 
-type EditorScreen = "meal" | "search" | "custom" | "details";
-
 export function MealEditor({
   meal,
   date,
   meals,
   onClose,
+  basePath,
+  homePath,
 }: {
   meal?: Meal;
   date: string;
   meals: Meal[];
   onClose: () => void;
+  basePath: string;
+  homePath: string;
 }) {
+  const drafts = useDraftStore();
+  const draftKey = datedPath(basePath, date);
+  const pathname = usePathname();
+  const screen =
+    pathname === `${basePath}/search`
+      ? "search"
+      : pathname === `${basePath}/custom-food`
+        ? "custom"
+        : pathname.startsWith(`${basePath}/food/`) ||
+            pathname.startsWith(`${basePath}/entry/`)
+          ? "details"
+          : "meal";
+  const route = (suffix = "") => datedPath(`${basePath}${suffix}`, date);
   const queryClient = useQueryClient();
   const nextMealNumber =
     Math.max(
       meals.length,
       ...meals.map((item) => Number(item.name.match(/^Meal (\d+)$/)?.[1] || 0)),
     ) + 1;
-  const originalName = meal?.name || `Meal ${nextMealNumber}`;
-  const [name, setName] = useState(originalName);
-  const [entries, setEntries] = useState<MealEntry[]>(meal?.entries || []);
-  const [screen, setScreen] = useState<EditorScreen>("meal");
-  const [selection, setSelection] = useState<{
-    food: Food;
-    index?: number;
-  } | null>(null);
-  const [customDirty, setCustomDirty] = useState(false);
+  const [baseline] = usePageDraft(`${draftKey}/baseline`, () => ({
+    name: meal?.name || `Meal ${nextMealNumber}`,
+    entries: meal?.entries || [],
+  }));
+  const originalName = baseline.name;
+  const [name, setName] = usePageDraft(`${draftKey}/name`, () => originalName);
+  const [entries, setEntries] = usePageDraft<MealEntry[]>(
+    `${draftKey}/entries`,
+    () => baseline.entries,
+  );
+  const [selectedFoods, setSelectedFoods] = usePageDraft<Record<string, Food>>(
+    `${draftKey}/selected`,
+    () => ({}),
+  );
+  const entryId = pathname.startsWith(`${basePath}/entry/`)
+    ? pathname.split("/").pop()
+    : undefined;
+  const entryIndex = entryId
+    ? entries.findIndex((entry) => entry.id === entryId)
+    : -1;
+  const foodId = pathname.startsWith(`${basePath}/food/`)
+    ? decodeURIComponent(pathname.split("/").pop() || "")
+    : "";
+  const selectedFood = selectedFoods[foodId];
+  const details = useQuery({
+    queryKey: foodId.startsWith("usda:")
+      ? ["food-details", "usda", foodId.slice(5)]
+      : ["custom-food", foodId],
+    queryFn: ({ signal }) =>
+      request<Food>(
+        foodId.startsWith("usda:")
+          ? `/api/foods/resolve?source=usda&id=${encodeURIComponent(foodId.slice(5))}`
+          : `/api/foods/${encodeURIComponent(foodId)}`,
+        { signal },
+      ),
+    enabled: screen === "details" && !!foodId && !selectedFood,
+    staleTime: foodId.startsWith("usda:") ? 180 * 24 * 60 * 60_000 : 30_000,
+    gcTime: foodId.startsWith("usda:") ? 24 * 60 * 60_000 : 5 * 60_000,
+  });
+  const selection =
+    entryIndex >= 0
+      ? { food: entries[entryIndex].food, index: entryIndex }
+      : selectedFood || details.data
+        ? { food: selectedFood || details.data!, index: undefined }
+        : null;
+  const [customDirty, setCustomDirty] = usePageDraft(
+    `${draftKey}/custom-dirty`,
+    () => false,
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const dirty =
     name !== originalName ||
-    JSON.stringify(entries) !== JSON.stringify(meal?.entries || []) ||
+    JSON.stringify(entries) !== JSON.stringify(baseline.entries) ||
     customDirty;
   const totals = sumNutrients(entries);
 
@@ -465,23 +536,27 @@ export function MealEditor({
   function close() {
     if (saving || deleting) return;
     if (dirty && !window.confirm("Discard unsaved meal changes?")) return;
+    discardDrafts(drafts, draftKey);
     onClose();
   }
 
   function back() {
+    goBack(screen === "meal" ? homePath : route());
+    setError(null);
+  }
+
+  function cancelCustom() {
     if (
       screen === "custom" &&
       customDirty &&
       !window.confirm("Discard this food?")
     )
       return;
-    setCustomDirty(false);
-    setScreen(
-      screen === "details" && selection?.index === undefined
-        ? "search"
-        : "meal",
-    );
-    setError(null);
+    if (screen === "custom") {
+      setCustomDirty(false);
+      discardDrafts(drafts, `${draftKey}/custom`);
+    }
+    back();
   }
 
   async function selectFood(food: Food) {
@@ -498,8 +573,8 @@ export function MealEditor({
             staleTime: 180 * 24 * 60 * 60_000,
             gcTime: 24 * 60 * 60_000,
           });
-    setSelection({ food: resolved });
-    setScreen("details");
+    setSelectedFoods((previous) => ({ ...previous, [resolved.id]: resolved }));
+    navigate(route(`/food/${encodeURIComponent(resolved.id)}`));
   }
 
   function addEntry(values: {
@@ -524,8 +599,8 @@ export function MealEditor({
             index === selection.index ? entry : item,
           ),
     );
-    setSelection(null);
-    setScreen("meal");
+    discardDrafts(drafts, `${draftKey}/details/${pathname}`);
+    returnTo(route());
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -559,6 +634,7 @@ export function MealEditor({
           predicate: (query) => query.queryKey[1] !== "external",
         }),
       ]);
+      discardDrafts(drafts, draftKey);
       onClose();
     } catch (cause) {
       setError(cause);
@@ -574,6 +650,7 @@ export function MealEditor({
     try {
       await request(`/api/meals/${meal.id}`, { method: "DELETE" });
       await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      discardDrafts(drafts, draftKey);
       onClose();
     } catch (cause) {
       setError(cause);
@@ -588,20 +665,16 @@ export function MealEditor({
         ? "Edit meal"
         : "Log meal"
       : screen === "search"
-        ? "Add food"
+        ? "Search foods"
         : screen === "custom"
           ? "Custom food"
           : "Food details";
 
   return (
-    <Sheet
-      open
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
+    <WorkflowPage
       title={title}
-      className={screen === "search" ? "food-search-sheet" : undefined}
-      onBack={screen === "meal" ? undefined : back}
+      search={screen === "search"}
+      onBack={back}
       description={
         screen === "meal"
           ? new Date(`${date}T12:00:00Z`).toLocaleDateString("en-GB", {
@@ -614,142 +687,153 @@ export function MealEditor({
       }
     >
       {screen === "meal" && (
-        <form className="meal-form" onSubmit={save}>
-          <div className="sheet-scroll form-stack">
-            <Field label="Meal name">
-              <Input
-                required
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </Field>
-            <NutritionStrip values={totals} />
-            <div className="form-section-label">
-              <span>Foods</span>
-              <span>
-                {entries.length} {entries.length === 1 ? "item" : "items"}
-              </span>
-            </div>
-            <div className="entry-list">
-              {entries.map((entry, index) => (
-                <div className="entry-row" key={entry.id}>
-                  <button
-                    className="entry-edit"
-                    onClick={() => {
-                      setSelection({ food: entry.food, index });
-                      setScreen("details");
-                    }}
-                    type="button"
-                  >
-                    <span className="entry-name">{entry.food.name}</span>
-                    <span className="entry-amount">
-                      {entry.servingName === "g"
-                        ? `${number(entry.grams, 1)} g`
-                        : `${number(entry.quantity, 2)} ${entry.servingName} · ${number(entry.grams, 1)} g`}
-                    </span>
-                    <MacroLine values={entry} />
-                  </button>
-                  <span className="entry-calories">
-                    {number(entry.calories)}
-                    <small>kcal</small>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove ${entry.food.name}`}
-                    onClick={() =>
-                      setEntries((previous) =>
-                        previous.filter(
-                          (_, entryIndex) => entryIndex !== index,
-                        ),
-                      )
-                    }
-                  >
-                    <X size={17} />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            {!entries.length && (
-              <div className="empty-state compact">
-                <Utensils size={24} />
-                <p>No foods added</p>
+        <div className="workflow-screen">
+          <form className="meal-form" onSubmit={save}>
+            <div className="sheet-scroll form-stack">
+              <Field label="Meal name">
+                <Input
+                  required
+                  maxLength={120}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
+              <NutritionStrip values={totals} />
+              <div className="form-section-label">
+                <span>Foods</span>
+                <span>
+                  {entries.length} {entries.length === 1 ? "item" : "items"}
+                </span>
               </div>
-            )}
-            <div className="form-actions">
+              <div className="entry-list">
+                {entries.map((entry, index) => (
+                  <div className="entry-row" key={entry.id}>
+                    <button
+                      className="entry-edit"
+                      onClick={() => {
+                        navigate(route(`/entry/${entry.id}`));
+                      }}
+                      type="button"
+                    >
+                      <span className="entry-name">{entry.food.name}</span>
+                      <span className="entry-amount">
+                        {entry.servingName === "g"
+                          ? `${number(entry.grams, 1)} g`
+                          : `${number(entry.quantity, 2)} ${entry.servingName} · ${number(entry.grams, 1)} g`}
+                      </span>
+                      <MacroLine values={entry} />
+                    </button>
+                    <span className="entry-calories">
+                      {number(entry.calories)}
+                      <small>kcal</small>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${entry.food.name}`}
+                      onClick={() =>
+                        setEntries((previous) =>
+                          previous.filter(
+                            (_, entryIndex) => entryIndex !== index,
+                          ),
+                        )
+                      }
+                    >
+                      <X size={17} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {!entries.length && (
+                <div className="empty-state compact">
+                  <Utensils size={24} />
+                  <p>No foods added</p>
+                </div>
+              )}
+              <div className="form-actions">
+                <Button
+                  variant="secondary"
+                  className="flex-fill"
+                  onClick={() => navigate(route("/search"))}
+                >
+                  <Search size={17} />
+                  Add food
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-fill"
+                  onClick={() => navigate(route("/custom-food"))}
+                >
+                  <Plus size={17} />
+                  Custom food
+                </Button>
+              </div>
+              <ErrorNotice error={error} />
+              {meal && (
+                <Button
+                  variant="destructive"
+                  className="align-start"
+                  disabled={saving || deleting}
+                  onClick={() => void removeMeal()}
+                >
+                  <SavingLabel saving={deleting}>
+                    <Trash2 size={16} />
+                    Delete meal
+                  </SavingLabel>
+                </Button>
+              )}
+            </div>
+            <div className="sheet-footer">
               <Button
                 variant="secondary"
-                className="flex-fill"
-                onClick={() => setScreen("search")}
+                onClick={close}
+                disabled={saving || deleting}
               >
-                <Search size={17} />
-                Add food
+                Discard
               </Button>
               <Button
-                variant="secondary"
                 className="flex-fill"
-                onClick={() => setScreen("custom")}
+                type="submit"
+                disabled={saving || deleting || !entries.length}
               >
-                <Plus size={17} />
-                Custom food
+                <SavingLabel saving={saving}>Save meal</SavingLabel>
               </Button>
             </div>
-            <ErrorNotice error={error} />
-            {meal && (
-              <Button
-                variant="destructive"
-                className="align-start"
-                disabled={saving || deleting}
-                onClick={() => void removeMeal()}
-              >
-                <SavingLabel saving={deleting}>
-                  <Trash2 size={16} />
-                  Delete meal
-                </SavingLabel>
-              </Button>
-            )}
-          </div>
-          <div className="sheet-footer">
-            <Button
-              variant="secondary"
-              onClick={close}
-              disabled={saving || deleting}
-            >
-              Discard
-            </Button>
-            <Button
-              className="flex-fill"
-              type="submit"
-              disabled={saving || deleting || !entries.length}
-            >
-              <SavingLabel saving={saving}>Save meal</SavingLabel>
-            </Button>
-          </div>
-        </form>
+          </form>
+        </div>
       )}
       {screen === "search" && (
-        <FoodSearch
-          onSelect={selectFood}
-          onCustom={() => setScreen("custom")}
-        />
+        <div className="workflow-screen">
+          <FoodSearch
+            draftKey={`${draftKey}/search`}
+            onSelect={selectFood}
+            onCustom={() => navigate(route("/custom-food"))}
+          />
+        </div>
       )}
       {screen === "custom" && (
-        <div className="sheet-scroll">
-          <FoodForm
-            onDirtyChange={() => setCustomDirty(true)}
-            onCancel={back}
-            onSaved={(food) => {
-              setCustomDirty(false);
-              setSelection({ food });
-              setScreen("details");
-            }}
-          />
+        <div className="workflow-screen">
+          <div className="sheet-scroll">
+            <FoodForm
+              draftKey={`${draftKey}/custom`}
+              onDirtyChange={() => setCustomDirty(true)}
+              onCancel={cancelCustom}
+              onSaved={(food) => {
+                setCustomDirty(false);
+                setSelectedFoods((previous) => ({
+                  ...previous,
+                  [food.id]: food,
+                }));
+                navigate(route(`/food/${encodeURIComponent(food.id)}`), true);
+              }}
+            />
+          </div>
         </div>
       )}
       {screen === "details" && selection && (
         <FoodDetails
           key={`${selection.food.id}:${selection.index ?? "new"}`}
+          draftKey={`${draftKey}/details/${pathname}`}
           food={selection.food}
           entry={
             selection.index === undefined ? undefined : entries[selection.index]
@@ -757,14 +841,60 @@ export function MealEditor({
           onConfirm={addEntry}
         />
       )}
-    </Sheet>
+      {screen === "details" && !selection && (
+        <div className="sheet-scroll">
+          {details.isPending ? (
+            <FoodListSkeleton label="Loading food details" />
+          ) : (
+            <>
+              <ErrorNotice
+                error={
+                  details.error ||
+                  new Error("This food entry is no longer in the meal.")
+                }
+              />
+              <Button variant="secondary" onClick={() => returnTo(route())}>
+                Back to meal
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </WorkflowPage>
   );
 }
 
 export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState("");
-  const [editing, setEditing] = useState<Food | null | undefined>(undefined);
-  const [dirty, setDirty] = useState(false);
+  const drafts = useDraftStore();
+  const pathname = usePathname();
+  const editingId = pathname.startsWith("/custom-foods/")
+    ? pathname.split("/").pop()
+    : undefined;
+  const [query, setQuery] = usePageDraft("custom-foods/query", () => "");
+  const [selectedFoods, setSelectedFoods] = useState<Record<string, Food>>({});
+  const detail = useQuery({
+    queryKey: ["custom-food", editingId],
+    queryFn: ({ signal }) =>
+      request<Food>(`/api/foods/${editingId}`, { signal }),
+    enabled: !!editingId && editingId !== "new" && !selectedFoods[editingId],
+  });
+  const editing =
+    editingId === "new"
+      ? null
+      : editingId
+        ? selectedFoods[editingId] || detail.data
+        : undefined;
+  const listing = !editingId;
+  const [dirtyFoods, setDirtyFoods] = usePageDraft<Record<string, boolean>>(
+    "custom-foods/dirty",
+    () => ({}),
+  );
+  const dirty = !!editingId && !!dirtyFoods[editingId];
+  const draftKey = `custom-foods/forms/${editingId}`;
+  function setDirty(value: boolean) {
+    if (editingId)
+      setDirtyFoods((previous) => ({ ...previous, [editingId]: value }));
+  }
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -787,7 +917,8 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
   function back() {
     if (dirty && !window.confirm("Discard unsaved food changes?")) return;
     setDirty(false);
-    setEditing(undefined);
+    discardDrafts(drafts, draftKey);
+    goBack("/custom-foods");
     setError(null);
   }
 
@@ -805,7 +936,8 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
         queryKey: ["foods"],
         predicate: (query) => query.queryKey[1] !== "external",
       });
-      setEditing(undefined);
+      returnTo("/custom-foods");
+      discardDrafts(drafts, draftKey);
       setDirty(false);
     } catch (cause) {
       setError(cause);
@@ -815,22 +947,18 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Sheet
-      open
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
+    <WorkflowPage
       title={
-        editing === undefined
+        listing
           ? "Custom foods"
-          : editing
-            ? "Edit food"
-            : "Create food"
+          : editingId === "new"
+            ? "Create food"
+            : "Edit food"
       }
-      onBack={editing === undefined ? undefined : back}
-      className={editing === undefined ? "food-search-sheet" : undefined}
+      onBack={listing ? close : () => goBack("/custom-foods")}
+      search={listing}
     >
-      {editing === undefined ? (
+      <div hidden={!listing} className="workflow-screen">
         <div className="food-search-layout">
           <div className="food-search-input">
             <div className="search-input-wrap">
@@ -875,7 +1003,13 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
                   <FoodRow
                     food={food}
                     key={food.id}
-                    onClick={() => setEditing(food)}
+                    onClick={() => {
+                      setSelectedFoods((previous) => ({
+                        ...previous,
+                        [food.id]: food,
+                      }));
+                      navigate(`/custom-foods/${food.id}`);
+                    }}
                   />
                 ))
               )}
@@ -901,7 +1035,7 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
           <div className="food-search-footer">
             <button
               className="create-food-row"
-              onClick={() => setEditing(null)}
+              onClick={() => navigate("/custom-foods/new")}
             >
               <span className="create-food-icon">
                 <Plus size={18} />
@@ -911,15 +1045,24 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
-      ) : (
+      </div>
+      {!listing && (editingId === "new" || editing) ? (
         <div className="sheet-scroll">
           <FoodForm
             key={editing?.id || "new"}
+            draftKey={draftKey}
             food={editing || undefined}
             onCancel={back}
             onDirtyChange={() => setDirty(true)}
             onSaved={() => {
-              setEditing(undefined);
+              if (editingId)
+                setSelectedFoods((previous) => {
+                  const next = { ...previous };
+                  delete next[editingId];
+                  return next;
+                });
+              void queryClient.invalidateQueries({ queryKey: ["custom-food"] });
+              returnTo("/custom-foods");
               setDirty(false);
             }}
           />
@@ -939,7 +1082,15 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
-      )}
-    </Sheet>
+      ) : !listing ? (
+        <div className="sheet-scroll">
+          {detail.isPending ? (
+            <FoodListSkeleton label="Loading custom food" />
+          ) : (
+            <ErrorNotice error={detail.error} />
+          )}
+        </div>
+      ) : null}
+    </WorkflowPage>
   );
 }

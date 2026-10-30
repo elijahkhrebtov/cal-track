@@ -5,6 +5,11 @@ import { LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { errorMessage, request } from "@/components/api";
+import {
+  discardDrafts,
+  useDraftStore,
+  usePageDraft,
+} from "@/components/drafts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Food, Measurement, MeasurementInput, Serving } from "@/lib/types";
@@ -228,23 +233,26 @@ export function FoodForm({
   onSaved,
   onCancel,
   onDirtyChange,
+  draftKey,
 }: {
   food?: Food;
   onSaved: (food: Food) => void;
   onCancel: () => void;
   onDirtyChange?: () => void;
+  draftKey: string;
 }) {
+  const drafts = useDraftStore();
   const queryClient = useQueryClient();
-  const [values, setValues] = useState({
+  const [values, setValues] = usePageDraft(`${draftKey}/values`, () => ({
     name: food?.name || "",
     calories: food?.calories.toString() || "",
     protein: food?.protein.toString() || "",
     fat: food?.fat.toString() || "",
     carbs: food?.carbs.toString() || "",
-  });
-  const [servings, setServings] = useState<
+  }));
+  const [servings, setServings] = usePageDraft<
     Array<{ id: string; name: string; grams: string }>
-  >(() =>
+  >(`${draftKey}/servings`, () =>
     (food?.servings || []).map((serving) => ({
       ...serving,
       grams: serving.grams.toString(),
@@ -286,6 +294,7 @@ export function FoodForm({
         queryKey: ["foods"],
         predicate: (query) => query.queryKey[1] !== "external",
       });
+      discardDrafts(drafts, draftKey);
       onSaved(saved);
     } catch (cause) {
       setError(cause);

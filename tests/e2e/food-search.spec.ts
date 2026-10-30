@@ -55,13 +55,16 @@ test("USDA results load on scroll, retry a failed page, and keep search and crea
   await page.goto("/");
   await page.getByRole("button", { name: "Log meal", exact: true }).click();
   await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
+  await expect(page.locator(".workflow-header h1")).toHaveText("Search foods");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   const input = page.getByLabel("Search foods");
   const create = page.getByRole("button", {
     name: "Create custom food",
     exact: true,
   });
-  const dialog = page.getByRole("dialog");
-  await dialog.evaluate(async (element) => {
+  const workflow = page.locator(".workflow-page");
+  await workflow.evaluate(async (element) => {
     await Promise.all(
       element.getAnimations().map((animation) => animation.finished),
     );
@@ -73,7 +76,7 @@ test("USDA results load on scroll, retry a failed page, and keep search and crea
   expect(requested).toEqual([1]);
   const beforeInput = await input.boundingBox();
   const beforeCreate = await create.boundingBox();
-  const bounds = await dialog.boundingBox();
+  const bounds = await workflow.boundingBox();
   expect(bounds!.height).toBeGreaterThan(page.viewportSize()!.height * 0.9);
   const list = page.getByLabel("Food results", { exact: true });
   await list.evaluate((element) => {
@@ -135,6 +138,7 @@ test("custom foods paginate in the list while the creation action remains availa
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Custom foods", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/custom-foods");
   await expect(
     page.getByRole("button", { name: /^Custom food \d+ Custom$/ }),
   ).toHaveCount(20);
@@ -182,6 +186,9 @@ test("USDA search and selected details reuse client caches across repeated selec
   await page.goto("/");
   await page.getByRole("button", { name: "Log meal", exact: true }).click();
   await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
+  await expect(page.locator(".workflow-header h1")).toHaveText("Search foods");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByLabel("Search foods").fill("  APPLE  ");
   await page
     .getByRole("button", { name: "Apple 01 USDA", exact: true })

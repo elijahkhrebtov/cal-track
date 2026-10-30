@@ -77,7 +77,12 @@ export function FoodPageLoader({
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) void onLoad();
       },
-      { root: root.current, rootMargin: "160px 0px" },
+      // The page becomes the scroller when the keyboard opens. Observing from
+      // it also respects the clipped inner list while the keyboard is closed.
+      {
+        root: root.current?.closest(".workflow-page") ?? root.current,
+        rootMargin: "160px 0px",
+      },
     );
     observer.observe(sentinel.current);
     return () => observer.disconnect();

@@ -296,6 +296,26 @@ export async function listFoods(
   };
 }
 
+export async function getCustomFood(
+  accountId: string,
+  id: string,
+): Promise<Food> {
+  const [row] = await getDb()
+    .select()
+    .from(foods)
+    .where(
+      and(
+        eq(foods.id, id),
+        eq(foods.accountId, accountId),
+        eq(foods.source, "custom"),
+        eq(foods.archived, false),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new HttpError(404, "Food not found.");
+  return foodDto(row);
+}
+
 export async function saveCustomFood(
   accountId: string,
   input: z.infer<typeof customFoodSchema>,

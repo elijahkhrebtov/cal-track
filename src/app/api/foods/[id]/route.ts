@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { requireAccount } from "@/lib/auth";
 import { api, assertSameOrigin, json, readJson } from "@/lib/http";
-import { deleteCustomFood, saveCustomFood } from "@/lib/repository";
+import {
+  deleteCustomFood,
+  getCustomFood,
+  saveCustomFood,
+} from "@/lib/repository";
 import { customFoodSchema } from "@/lib/validation";
 
 function foodId(request: Request) {
   return z.uuid().parse(new URL(request.url).pathname.split("/").pop());
 }
+
+export const GET = api(async (request) => {
+  const accountId = await requireAccount();
+  return json(await getCustomFood(accountId, foodId(request)));
+});
 
 export const PATCH = api(async (request) => {
   const accountId = await requireAccount();

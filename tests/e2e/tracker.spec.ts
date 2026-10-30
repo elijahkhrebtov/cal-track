@@ -26,16 +26,19 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   await page.getByRole("button", { name: "Custom food", exact: true }).click();
   await page.getByLabel("Food name").fill(foodInput.name);
   await page
-    .getByRole("dialog")
+    .locator(".workflow-page")
     .getByLabel("Calories", { exact: false })
     .fill("60");
   await page
-    .getByRole("dialog")
+    .locator(".workflow-page")
     .getByLabel("Protein", { exact: false })
     .fill("10");
-  await page.getByRole("dialog").getByLabel("Fat", { exact: false }).fill("1");
   await page
-    .getByRole("dialog")
+    .locator(".workflow-page")
+    .getByLabel("Fat", { exact: false })
+    .fill("1");
+  await page
+    .locator(".workflow-page")
     .getByLabel("Carbs", { exact: false })
     .fill("3");
   await page.getByRole("button", { name: "Add serving size" }).click();
@@ -50,7 +53,8 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   await page.getByRole("button", { name: "Add to meal" }).click();
   await page.getByLabel("Meal name").fill("Lunch");
   await page.getByRole("button", { name: "Save meal", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  await expect(page.locator(".workflow-page")).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Calories", exact: true }),
   ).toBeVisible();
@@ -66,7 +70,8 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   await page.getByLabel("Amount").fill("1");
   await page.getByRole("button", { name: "Update food entry" }).click();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  await expect(page.locator(".workflow-page")).toHaveCount(0);
   const discarded = (await (
     await page.request.get(`/api/dashboard?date=${account.today}`)
   ).json()) as Dashboard;
@@ -75,17 +80,20 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   await page.getByRole("button", { name: "Custom foods", exact: true }).click();
   await page.getByRole("button", { name: /Test yogurt/ }).click();
   await page
-    .getByRole("dialog")
+    .locator(".workflow-page")
     .getByLabel("Calories", { exact: false })
     .fill("100");
   await page.getByRole("button", { name: "Save food", exact: true }).click();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/custom-foods");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/");
   await page.getByRole("button", { name: /Lunch/ }).click();
   await page.getByRole("button", { name: /Test yogurt.*2 bowl/ }).click();
   await page.getByLabel("Amount").fill("1");
   await page.getByRole("button", { name: "Update food entry" }).click();
   await page.getByRole("button", { name: "Save meal", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  await expect(page.locator(".workflow-page")).toHaveCount(0);
   const updated = (await (
     await page.request.get(`/api/dashboard?date=${account.today}`)
   ).json()) as Dashboard;
@@ -99,7 +107,8 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   await page.getByRole("button", { name: /Test yogurt.*Custom/ }).click();
   await page.getByRole("button", { name: "Add to meal" }).click();
   await page.getByRole("button", { name: "Save meal", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  await expect(page.locator(".workflow-page")).toHaveCount(0);
   const futureEntry = (await (
     await page.request.get(`/api/dashboard?date=${account.today}`)
   ).json()) as Dashboard;
@@ -107,7 +116,8 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
 
   await page.getByRole("button", { name: /Lunch/ }).click();
   await page.getByRole("button", { name: "Delete meal", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  await expect(page.locator(".workflow-page")).toHaveCount(0);
   const deleted = (await (
     await page.request.get(`/api/dashboard?date=${account.today}`)
   ).json()) as Dashboard;
@@ -189,12 +199,30 @@ test("historical measurements, prior-seven-day summary, low-day completion and r
 test("local fuzzy food search, account ownership, snapshot persistence, and source validation", async ({
   page,
   account,
+  browser,
 }) => {
   const food = (await (
     await page.request.post("/api/foods", {
       data: { ...foodInput, name: "Chicken breast" },
     })
   ).json()) as Food;
+  const detail = await page.request.get(`/api/foods/${food.id}`);
+  expect(detail.status()).toBe(200);
+  expect(detail.headers()["cache-control"]).toContain("no-store");
+  expect(((await detail.json()) as Food).name).toBe("Chicken breast");
+  const signedOut = await browser.newContext();
+  try {
+    expect(
+      (
+        await signedOut.request.get(
+          `http://127.0.0.1:3100/api/foods/${food.id}`,
+        )
+      ).status(),
+    ).toBe(401);
+  } finally {
+    await signedOut.close();
+  }
+  expect((await page.request.get("/api/foods/not-a-uuid")).status()).toBe(400);
   const results = (await (
     await page.request.get("/api/foods?q=chiken")
   ).json()) as { foods: Food[] };
@@ -264,6 +292,7 @@ test("local fuzzy food search, account ownership, snapshot persistence, and sour
   expect((await page.request.delete(`/api/foods/${food.id}`)).status()).toBe(
     200,
   );
+  expect((await page.request.get(`/api/foods/${food.id}`)).status()).toBe(404);
   const remaining = (await (
     await page.request.get(`/api/dashboard?date=${account.today}`)
   ).json()) as Dashboard;

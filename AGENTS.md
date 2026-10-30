@@ -46,7 +46,9 @@ Use the lively green accent `#4ade80`, with `#6ee7a0` for its hover state. Neutr
 
 Preserve mobile safe areas, readable form controls, accessible labels, keyboard focus, and explicit save/discard/delete actions. Reuse the shared button, input, and sheet components. Opening food search must not autofocus its input.
 
-Food search and the custom-food list use nearly full-screen sheets. Only the results list scrolls; the search bar and custom-food creation action stay visible. Keep skeletons during debounce and initial loading without flashing empty states, and retain existing results during background refreshes.
+Meal logging/editing, food search/details, food creation/editing, and the custom-food library use separate URLs with browser history navigation. Preserve in-memory drafts across Back/Forward; saving or explicitly discarding clears the corresponding draft. Shared tracker layout and workspace draft storage are under `src/app/(tracker)/` and `src/components/drafts.tsx`. Measurement editing stays in a bottom sheet.
+
+With the keyboard closed, only the search results scroll; the search bar and custom-food creation action stay visible. With the keyboard open, size the workflow to the visual viewport and let the entire page scroll so all fields and actions remain reachable. Preserve Android viewport resizing and the visual-viewport fallback. Keep skeletons during debounce and initial loading without flashing empty states, and retain existing results during background refreshes.
 
 When changing app identity or colors, keep the manifest, viewport theme, SVG icon, offline fallback, and PNG icons consistent. Regenerate tracked PNGs with `npx tsx scripts/generate-icons.ts`. The service worker must not cache private API responses or meal data; registration is enabled only in production.
 

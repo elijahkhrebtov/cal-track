@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownRight,
@@ -23,6 +24,14 @@ import {
 
 import { ApiError, request } from "@/components/api";
 import { DashboardSkeleton } from "@/components/loading";
+import { DraftProvider } from "@/components/drafts";
+import {
+  datedPath,
+  goBack,
+  navigate,
+  returnTo,
+  WorkflowPage,
+} from "@/components/workflow-page";
 import {
   ErrorNotice,
   Field,
@@ -720,99 +729,152 @@ function DayCompletion({ data }: { data: Dashboard }) {
 }
 
 function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ meal?: Meal } | null>(null);
-  const [library, setLibrary] = useState(false);
+  const pathname = usePathname();
+  const params = useSearchParams();
   const [measurements, setMeasurements] = useState(false);
-  const date = selected || bootstrap.today;
+  const requestedDate = params.get("date");
+  const date =
+    requestedDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) &&
+    requestedDate >= bootstrap.startDate! &&
+    requestedDate <= bootstrap.today
+      ? requestedDate
+      : bootstrap.today;
+  const homePath = date === bootstrap.today ? "/" : datedPath("/", date);
+  const routeMealId = pathname.startsWith("/meals/")
+    ? pathname.split("/")[2]
+    : null;
+  const library = pathname.startsWith("/custom-foods");
   const result = useQuery({
     queryKey: ["dashboard", date],
     queryFn: ({ signal }) =>
       request<Dashboard>(`/api/dashboard?date=${date}`, { signal }),
   });
   const data = result.data;
+  const routedMeal = data?.meals.find((meal) => meal.id === routeMealId);
+  const activeEditor =
+    routeMealId && data && (routeMealId === "new" || routedMeal)
+      ? { meal: routedMeal, date }
+      : null;
+
+  function openMeal(meal?: Meal) {
+    navigate(datedPath(`/meals/${meal?.id || "new"}`, date));
+  }
+
+  function closeMeal() {
+    returnTo(homePath);
+  }
+
+  function selectDate(selected: string) {
+    navigate(selected === bootstrap.today ? "/" : datedPath("/", selected));
+  }
 
   return (
-    <div className="app-shell">
-      <Header onLibrary={() => setLibrary(true)} />
-      <main className="dashboard-main">
-        <DateSelector
-          date={date}
-          today={bootstrap.today}
-          startDate={bootstrap.startDate!}
-          onChange={setSelected}
-        />
-        {result.isPending ? (
-          <DashboardSkeleton />
-        ) : result.error ? (
-          <div className="card error-card">
-            <ErrorNotice error={result.error} />
-            <Button variant="secondary" onClick={() => void result.refetch()}>
-              Try again
-            </Button>
-          </div>
-        ) : (
-          data && (
-            <>
-              <CalorieCard data={data} />
-              <MacrosCard data={data} />
-              <MealsCard
-                meals={data.meals}
-                onEdit={(meal) => setEditor({ meal })}
-                onAdd={() => setEditor({})}
-              />
-              <HistoryChart
-                history={data.history}
-                date={date}
-                startDate={data.startDate}
-                onSelect={setSelected}
-              />
-              <SummaryCard data={data} />
-              <DayCompletion key={date} data={data} />
-              <button
-                className="weight-update-button"
-                onClick={() => setMeasurements(true)}
-              >
-                <span className="weight-update-icon">
-                  <Scale size={20} />
-                </span>
-                <span>
-                  <strong>Update measurements</strong>
-                  <span>
-                    {number(data.measurement.weightKg, 1)} kg
-                    <span className="weight-arrow">→</span>
-                    {number(data.measurement.targetWeightKg, 1)} kg target
+    <>
+      <div className="app-shell" hidden={pathname !== "/"}>
+        <Header onLibrary={() => navigate("/custom-foods")} />
+        <main className="dashboard-main">
+          <DateSelector
+            date={date}
+            today={bootstrap.today}
+            startDate={bootstrap.startDate!}
+            onChange={selectDate}
+          />
+          {result.isPending ? (
+            <DashboardSkeleton />
+          ) : result.error ? (
+            <div className="card error-card">
+              <ErrorNotice error={result.error} />
+              <Button variant="secondary" onClick={() => void result.refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : (
+            data && (
+              <>
+                <CalorieCard data={data} />
+                <MacrosCard data={data} />
+                <MealsCard
+                  meals={data.meals}
+                  onEdit={openMeal}
+                  onAdd={() => openMeal()}
+                />
+                <HistoryChart
+                  history={data.history}
+                  date={date}
+                  startDate={data.startDate}
+                  onSelect={selectDate}
+                />
+                <SummaryCard data={data} />
+                <DayCompletion key={date} data={data} />
+                <button
+                  className="weight-update-button"
+                  onClick={() => setMeasurements(true)}
+                >
+                  <span className="weight-update-icon">
+                    <Scale size={20} />
                   </span>
-                </span>
-                <ChevronRight size={18} />
-              </button>
-              <div className="dashboard-footer">
-                <span className="status-dot" />
-                Tashkent · kcal · metric
-              </div>
-            </>
-          )
-        )}
-      </main>
-      <Button
-        className="log-meal-fab"
-        aria-label="Log meal"
-        disabled={!data}
-        onClick={() => setEditor({})}
-      >
-        <Plus size={25} />
-        <span>Log meal</span>
-      </Button>
-      {editor && data && (
+                  <span>
+                    <strong>Update measurements</strong>
+                    <span>
+                      {number(data.measurement.weightKg, 1)} kg
+                      <span className="weight-arrow">→</span>
+                      {number(data.measurement.targetWeightKg, 1)} kg target
+                    </span>
+                  </span>
+                  <ChevronRight size={18} />
+                </button>
+                <div className="dashboard-footer">
+                  <span className="status-dot" />
+                  Tashkent · kcal · metric
+                </div>
+              </>
+            )
+          )}
+        </main>
+        <Button
+          className="log-meal-fab"
+          aria-label="Log meal"
+          disabled={!data}
+          onClick={() => openMeal()}
+        >
+          <Plus size={25} />
+          <span>Log meal</span>
+        </Button>
+      </div>
+      {activeEditor && data && (
         <MealEditor
-          key={`${date}:${editor.meal?.id || "new"}`}
+          key={`${date}:${activeEditor.meal?.id || "new"}`}
           date={date}
-          meal={editor.meal}
+          meal={activeEditor.meal}
           meals={data.meals}
-          onClose={() => setEditor(null)}
+          basePath={`/meals/${activeEditor.meal?.id || "new"}`}
+          homePath={homePath}
+          onClose={closeMeal}
         />
       )}
-      {library && <CustomFoodLibrary onClose={() => setLibrary(false)} />}
+      {routeMealId && !activeEditor && (
+        <WorkflowPage
+          title={result.isPending ? "Loading meal" : "Meal unavailable"}
+          onBack={() => goBack(homePath)}
+        >
+          {result.isPending ? (
+            <DashboardSkeleton />
+          ) : (
+            <div className="sheet-scroll">
+              <ErrorNotice
+                error={
+                  result.error ||
+                  new Error(
+                    "This meal could not be found for the selected date.",
+                  )
+                }
+              />
+            </div>
+          )}
+        </WorkflowPage>
+      )}
+      {library && <CustomFoodLibrary onClose={() => goBack(homePath)} />}
       {measurements && data && (
         <Sheet open onOpenChange={setMeasurements} title="Update measurements">
           <div className="sheet-scroll">
@@ -826,7 +888,7 @@ function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
           </div>
         </Sheet>
       )}
-    </div>
+    </>
   );
 }
 
@@ -854,5 +916,9 @@ export default function TrackerApp() {
     );
   if (!bootstrap.data?.measurement)
     return <Onboarding today={bootstrap.data!.today} />;
-  return <DailyDashboard bootstrap={bootstrap.data} />;
+  return (
+    <DraftProvider>
+      <DailyDashboard bootstrap={bootstrap.data} />
+    </DraftProvider>
+  );
 }

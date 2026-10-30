@@ -40,6 +40,7 @@ test("custom foods shows loading without false empty states or shifting the sear
     await page
       .getByRole("button", { name: "Custom foods", exact: true })
       .click();
+    await expect(page).toHaveURL((url) => url.pathname === "/custom-foods");
     const input = page.getByLabel("Search custom foods");
     await expect(
       page.getByRole("status", { name: "Loading custom foods", exact: true }),
@@ -47,7 +48,7 @@ test("custom foods shows loading without false empty states or shifting the sear
     await expect(
       page.getByText("No custom foods", { exact: true }),
     ).toHaveCount(0);
-    await page.getByRole("dialog").evaluate(async (element) => {
+    await page.locator(".workflow-page").evaluate(async (element) => {
       await Promise.all(
         element.getAnimations().map((animation) => animation.finished),
       );
@@ -102,6 +103,10 @@ test("saved and USDA food searches show independent loading states through debou
     await page.goto("/");
     await page.getByRole("button", { name: "Log meal", exact: true }).click();
     await page.getByRole("button", { name: "Add food", exact: true }).click();
+    await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
+    await expect(page.locator(".workflow-header h1")).toHaveText(
+      "Search foods",
+    );
     const input = page.getByLabel("Search foods");
     await expect(input).not.toBeFocused();
     await expect(
