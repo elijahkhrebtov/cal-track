@@ -282,7 +282,10 @@ export function FoodForm({
           }),
         },
       );
-      await queryClient.invalidateQueries({ queryKey: ["foods"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["foods"],
+        predicate: (query) => query.queryKey[1] !== "external",
+      });
       onSaved(saved);
     } catch (cause) {
       setError(cause);

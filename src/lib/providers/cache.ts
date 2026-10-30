@@ -7,7 +7,7 @@ interface CacheEntry<T> {
 // supplies durable caching of foods the user has actually logged.
 const values = new Map<string, CacheEntry<unknown>>();
 const pending = new Map<string, Promise<unknown>>();
-const MAX_ENTRIES = 256;
+const MAX_ENTRIES = 1024;
 
 export async function cached<T>(
   key: string,
@@ -15,7 +15,12 @@ export async function cached<T>(
   load: () => Promise<T>,
 ): Promise<T> {
   const entry = values.get(key);
-  if (entry && entry.expiresAt > Date.now()) return entry.value as T;
+  if (entry && entry.expiresAt > Date.now()) {
+    values.delete(key);
+    values.set(key, entry);
+    return entry.value as T;
+  }
+  if (entry) values.delete(key);
   const inFlight = pending.get(key);
   if (inFlight) return inFlight as Promise<T>;
 

@@ -22,6 +22,12 @@ export interface Food extends Nutrients {
   servings: Serving[];
 }
 
+export interface FoodSearchPage {
+  foods: Food[];
+  nextPage: number | null;
+  warnings: string[];
+}
+
 export interface MealEntry extends Nutrients {
   id: string;
   foodId: string;

@@ -38,12 +38,15 @@ Keep server credentials, database code, and provider requests behind `server-onl
 - Meals remain client drafts until explicitly saved. Discard must leave the saved meal unchanged. Custom-food creation is a separate save.
 - Meal entries contain immutable food nutrition snapshots. Updating an existing entry's amount preserves its original nutrition; new entries use current food data. Preserve entry IDs when editing meals. Archiving a custom food must leave historical entries intact.
 - Search local foods first, debounce external searches longer, deduplicate saved USDA foods against external results, and resolve external details before adding entries. Persist imported foods when saving a meal. Preserve caching, request coalescing, and rate-limit handling.
+- Food results paginate in batches of 20. Keep USDA's generic-before-branded ordering across pages, reset pagination for new queries, and preserve loaded results when a later page fails. Cache public upstream searches for seven days and details for 180 days; do not invalidate external caches for local food edits.
 
 ## Interface conventions
 
 Use the lively green accent `#4ade80`, with `#6ee7a0` for its hover state. Neutral backgrounds, surfaces, borders, and text must be grey, without a green tint. Keep semantic warning/error colors and macro indicators distinct. Theme tokens are in `src/app/globals.css`.
 
 Preserve mobile safe areas, readable form controls, accessible labels, keyboard focus, and explicit save/discard/delete actions. Reuse the shared button, input, and sheet components. Opening food search must not autofocus its input.
+
+Food search and the custom-food list use nearly full-screen sheets. Only the results list scrolls; the search bar and custom-food creation action stay visible. Keep skeletons during debounce and initial loading without flashing empty states, and retain existing results during background refreshes.
 
 When changing app identity or colors, keep the manifest, viewport theme, SVG icon, offline fallback, and PNG icons consistent. Regenerate tracked PNGs with `npx tsx scripts/generate-icons.ts`. The service worker must not cache private API responses or meal data; registration is enabled only in production.
 

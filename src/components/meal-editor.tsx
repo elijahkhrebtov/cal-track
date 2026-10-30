@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   ChevronRight,
@@ -14,6 +14,13 @@ import {
 } from "lucide-react";
 
 import { request } from "@/components/api";
+import { FoodListSkeleton } from "@/components/loading";
+import {
+  FoodPageLoader,
+  foodKey,
+  foodPages,
+  useFoodPages,
+} from "@/components/food-pagination";
 import { ErrorNotice, Field, FoodForm, SavingLabel } from "@/components/forms";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,12 +118,6 @@ export function FoodRow({
   );
 }
 
-function foodKey(food: Food) {
-  return food.source === "custom"
-    ? food.id
-    : `${food.source}:${food.externalId}`;
-}
-
 function FoodSearch({
   onSelect,
   onCustom,
@@ -127,37 +128,33 @@ function FoodSearch({
   const [query, setQuery] = useState("");
   const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const localQuery = useDebounced(query.trim(), 150);
-  const externalQuery = useDebounced(query.trim(), 850);
-  const local = useQuery({
-    queryKey: ["foods", "local", localQuery],
-    queryFn: ({ signal }) =>
-      request<{ foods: Food[] }>(
-        `/api/foods?q=${encodeURIComponent(localQuery)}`,
-        { signal },
-      ),
-  });
-  const remote = useQuery({
-    queryKey: ["foods", "external", externalQuery],
-    queryFn: ({ signal }) =>
-      request<{ foods: Food[]; warnings: string[] }>(
-        `/api/foods/search?q=${encodeURIComponent(externalQuery)}`,
-        { signal },
-      ),
-    enabled: externalQuery.length >= 2,
-    staleTime: 5 * 60_000,
-  });
-  const saved = local.data?.foods || [];
+  const listRef = useRef<HTMLDivElement>(null);
+  const currentQuery = query.trim().replace(/\s+/g, " ").toLowerCase();
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [currentQuery]);
+  const localQuery = useDebounced(currentQuery, 150);
+  const externalQuery = useDebounced(currentQuery, 850);
+  const local = useFoodPages("local", localQuery);
+  const remote = useFoodPages(
+    "external",
+    externalQuery,
+    externalQuery.length >= 2,
+  );
+  const localIsCurrent = localQuery === currentQuery;
+  const remoteIsCurrent = externalQuery === currentQuery;
+  const loadingLocal = !localIsCurrent || local.isPending;
+  const loadingRemote =
+    currentQuery.length >= 2 && (!remoteIsCurrent || remote.isPending);
+  const saved = localIsCurrent ? foodPages(local.data?.pages) : [];
   const savedKeys = new Set(saved.map(foodKey));
-  const external =
-    externalQuery === query.trim()
-      ? (remote.data?.foods || []).filter(
-          (food) => !savedKeys.has(foodKey(food)),
-        )
-      : [];
+  const external = remoteIsCurrent
+    ? foodPages(remote.data?.pages).filter(
+        (food) => !savedKeys.has(foodKey(food)),
+      )
+    : [];
   const searchingRemote =
-    query.trim().length >= 2 &&
-    (query.trim() !== externalQuery || remote.isFetching);
+    currentQuery.length >= 2 && (!remoteIsCurrent || remote.isFetching);
 
   async function select(food: Food) {
     if (resolving) return;
@@ -173,79 +170,150 @@ function FoodSearch({
   }
 
   return (
-    <div className="sheet-scroll search-screen">
-      <div className="search-input-wrap">
-        <Search size={18} />
-        <Input
-          autoComplete="off"
-          autoFocus={false}
-          aria-label="Search foods"
-          placeholder="Search foods"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {query && (
-          <button aria-label="Clear search" onClick={() => setQuery("")}>
-            <X size={16} />
-          </button>
-        )}
-      </div>
-      <ErrorNotice error={error || local.error} />
-      <div className="list-section-title">
-        {query.trim() ? "Saved foods" : "Recent foods"}
-        {local.isFetching && <LoaderCircle size={14} className="spin" />}
-      </div>
-      <div className="food-list">
-        {saved.map((food) => (
-          <FoodRow
-            key={food.id}
-            food={food}
-            onClick={() => void select(food)}
-            busy={resolving === food.id}
+    <div className="food-search-layout">
+      <div className="food-search-input">
+        <div className="search-input-wrap">
+          <Search size={18} />
+          <Input
+            autoComplete="off"
+            autoFocus={false}
+            aria-label="Search foods"
+            placeholder="Search foods"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
-        ))}
+          {query && (
+            <button aria-label="Clear search" onClick={() => setQuery("")}>
+              <X size={16} />
+            </button>
+          )}
+        </div>
       </div>
-      {!local.isPending && !saved.length && (
-        <p className="list-empty">
-          {query.trim()
-            ? "No saved matches."
-            : "Foods from saved meals appear here."}
-        </p>
-      )}
-      {query.trim().length >= 2 && (
-        <>
-          <div className="list-section-title">
-            More results
-            {searchingRemote && <LoaderCircle size={14} className="spin" />}
-          </div>
-          <div className="food-list">
-            {external.map((food) => (
+      <div
+        ref={listRef}
+        className="food-results-scroll"
+        aria-label="Food results"
+      >
+        <ErrorNotice
+          error={
+            error ||
+            (localIsCurrent && !local.isFetchNextPageError && local.error)
+          }
+        />
+        {localIsCurrent && local.isError && !local.isFetchNextPageError && (
+          <Button variant="ghost" onClick={() => void local.refetch()}>
+            Retry saved foods
+          </Button>
+        )}
+        <div className="list-section-title">
+          {query.trim() ? "Saved foods" : "Recent foods"}
+          {local.isFetching && <LoaderCircle size={14} className="spin" />}
+        </div>
+        <div className="food-list">
+          {loadingLocal ? (
+            <FoodListSkeleton
+              label={
+                currentQuery ? "Searching saved foods" : "Loading recent foods"
+              }
+            />
+          ) : (
+            saved.map((food) => (
               <FoodRow
                 key={food.id}
                 food={food}
                 onClick={() => void select(food)}
                 busy={resolving === food.id}
               />
-            ))}
-          </div>
-          {!searchingRemote && !external.length && !remote.error && (
-            <p className="list-empty">No additional matches.</p>
+            ))
           )}
-          <ErrorNotice error={remote.error} />
-          {remote.data?.warnings.map((warning) => (
-            <p className="inline-warning" role="status" key={warning}>
-              {warning}
-            </p>
-          ))}
-        </>
-      )}
-      <button className="create-food-row" onClick={onCustom}>
-        <span className="create-food-icon">
-          <Plus size={18} />
-        </span>
-        <span>Create custom food</span>
-        <ArrowRight size={17} />
-      </button>
+        </div>
+        {localIsCurrent && !loadingLocal && (
+          <FoodPageLoader
+            root={listRef}
+            hasMore={!!local.hasNextPage}
+            loading={local.isFetchingNextPage}
+            refreshing={local.isRefetching}
+            error={local.isFetchNextPageError ? local.error : null}
+            onLoad={local.loadMore}
+            label="saved foods"
+          />
+        )}
+        {!loadingLocal && !local.error && !saved.length && (
+          <p className="list-empty">
+            {query.trim()
+              ? "No saved matches."
+              : "Foods from saved meals appear here."}
+          </p>
+        )}
+        {query.trim().length >= 2 && (
+          <>
+            <div className="list-section-title">
+              More results
+              {searchingRemote && <LoaderCircle size={14} className="spin" />}
+            </div>
+            <div className="food-list">
+              {loadingRemote ? (
+                <FoodListSkeleton label="Searching USDA foods" />
+              ) : (
+                external.map((food) => (
+                  <FoodRow
+                    key={food.id}
+                    food={food}
+                    onClick={() => void select(food)}
+                    busy={resolving === food.id}
+                  />
+                ))
+              )}
+            </div>
+            {!loadingRemote &&
+              !external.length &&
+              !remote.error &&
+              !remote.data?.pages.some((page) => page.warnings?.length) && (
+                <p className="list-empty">No additional matches.</p>
+              )}
+            {remoteIsCurrent && !loadingRemote && (
+              <FoodPageLoader
+                root={listRef}
+                hasMore={!!remote.hasNextPage}
+                loading={remote.isFetchingNextPage}
+                refreshing={remote.isRefetching}
+                error={remote.isFetchNextPageError ? remote.error : null}
+                onLoad={remote.loadMore}
+                label="USDA foods"
+              />
+            )}
+            <ErrorNotice
+              error={
+                remoteIsCurrent && !remote.isFetchNextPageError && remote.error
+              }
+            />
+            {remoteIsCurrent &&
+              remote.isError &&
+              !remote.isFetchNextPageError && (
+                <Button variant="ghost" onClick={() => void remote.refetch()}>
+                  Retry USDA search
+                </Button>
+              )}
+            {remoteIsCurrent &&
+              remote.data?.pages
+                .flatMap((page) => page.warnings ?? [])
+                .map((warning) => (
+                  <p className="inline-warning" role="status" key={warning}>
+                    {warning}
+                  </p>
+                ))}
+          </>
+        )}
+      </div>
+      <div className="food-search-footer">
+        <button className="create-food-row" onClick={onCustom}>
+          <span className="create-food-icon">
+            <Plus size={18} />
+          </span>
+          <span>Create custom food</span>
+          <ArrowRight size={17} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -420,9 +488,16 @@ export function MealEditor({
     const resolved =
       food.source === "custom"
         ? food
-        : await request<Food>(
-            `/api/foods/resolve?source=${food.source}&id=${encodeURIComponent(food.externalId || food.id)}`,
-          );
+        : await queryClient.fetchQuery({
+            queryKey: ["food-details", food.source, food.externalId || food.id],
+            queryFn: ({ signal }) =>
+              request<Food>(
+                `/api/foods/resolve?source=${food.source}&id=${encodeURIComponent(food.externalId || food.id)}`,
+                { signal },
+              ),
+            staleTime: 180 * 24 * 60 * 60_000,
+            gcTime: 24 * 60 * 60_000,
+          });
     setSelection({ food: resolved });
     setScreen("details");
   }
@@ -479,7 +554,10 @@ export function MealEditor({
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
-        queryClient.invalidateQueries({ queryKey: ["foods"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["foods"],
+          predicate: (query) => query.queryKey[1] !== "external",
+        }),
       ]);
       onClose();
     } catch (cause) {
@@ -522,6 +600,7 @@ export function MealEditor({
         if (!open) close();
       }}
       title={title}
+      className={screen === "search" ? "food-search-sheet" : undefined}
       onBack={screen === "meal" ? undefined : back}
       description={
         screen === "meal"
@@ -688,16 +767,17 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
   const [dirty, setDirty] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const debounced = useDebounced(query.trim(), 150);
+  const listRef = useRef<HTMLDivElement>(null);
+  const currentQuery = query.trim().replace(/\s+/g, " ").toLowerCase();
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [currentQuery]);
+  const debounced = useDebounced(currentQuery, 150);
   const queryClient = useQueryClient();
-  const result = useQuery({
-    queryKey: ["foods", "custom", debounced],
-    queryFn: ({ signal }) =>
-      request<{ foods: Food[] }>(
-        `/api/foods?custom=true&q=${encodeURIComponent(debounced)}`,
-        { signal },
-      ),
-  });
+  const result = useFoodPages("custom", debounced);
+  const isCurrent = debounced === currentQuery;
+  const loading = !isCurrent || result.isPending;
+  const foods = isCurrent ? foodPages(result.data?.pages) : [];
 
   function close() {
     if (dirty && !window.confirm("Discard unsaved food changes?")) return;
@@ -721,7 +801,10 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       await request(`/api/foods/${editing.id}`, { method: "DELETE" });
-      await queryClient.invalidateQueries({ queryKey: ["foods"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["foods"],
+        predicate: (query) => query.queryKey[1] !== "external",
+      });
       setEditing(undefined);
       setDirty(false);
     } catch (cause) {
@@ -745,10 +828,11 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
             : "Create food"
       }
       onBack={editing === undefined ? undefined : back}
+      className={editing === undefined ? "food-search-sheet" : undefined}
     >
-      <div className="sheet-scroll">
-        {editing === undefined ? (
-          <>
+      {editing === undefined ? (
+        <div className="food-search-layout">
+          <div className="food-search-input">
             <div className="search-input-wrap">
               <Search size={18} />
               <Input
@@ -759,26 +843,62 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
+          </div>
+          <div
+            ref={listRef}
+            className="food-results-scroll"
+            aria-label="Custom food results"
+          >
             <div className="list-section-title">
-              <span>{result.data?.foods.length || 0} foods</span>
+              <span>{loading ? "Loading foods" : `${foods.length} foods`}</span>
               {result.isFetching && <LoaderCircle size={14} className="spin" />}
             </div>
-            <ErrorNotice error={result.error} />
+            <ErrorNotice
+              error={isCurrent && !result.isFetchNextPageError && result.error}
+            />
+            {isCurrent && result.isError && !result.isFetchNextPageError && (
+              <Button variant="ghost" onClick={() => void result.refetch()}>
+                Retry custom foods
+              </Button>
+            )}
             <div className="food-list">
-              {result.data?.foods.map((food) => (
-                <FoodRow
-                  food={food}
-                  key={food.id}
-                  onClick={() => setEditing(food)}
+              {loading ? (
+                <FoodListSkeleton
+                  label={
+                    query.trim()
+                      ? "Searching custom foods"
+                      : "Loading custom foods"
+                  }
                 />
-              ))}
+              ) : (
+                foods.map((food) => (
+                  <FoodRow
+                    food={food}
+                    key={food.id}
+                    onClick={() => setEditing(food)}
+                  />
+                ))
+              )}
             </div>
-            {!result.isPending && !result.data?.foods.length && (
+            {isCurrent && !loading && (
+              <FoodPageLoader
+                root={listRef}
+                hasMore={!!result.hasNextPage}
+                loading={result.isFetchingNextPage}
+                refreshing={result.isRefetching}
+                error={result.isFetchNextPageError ? result.error : null}
+                onLoad={result.loadMore}
+                label="custom foods"
+              />
+            )}
+            {!loading && !result.error && !foods.length && (
               <div className="empty-state">
                 <Utensils size={24} />
                 <p>{query ? "No matches" : "No custom foods"}</p>
               </div>
             )}
+          </div>
+          <div className="food-search-footer">
             <button
               className="create-food-row"
               onClick={() => setEditing(null)}
@@ -789,37 +909,37 @@ export function CustomFoodLibrary({ onClose }: { onClose: () => void }) {
               <span>Create custom food</span>
               <ArrowRight size={17} />
             </button>
-          </>
-        ) : (
-          <>
-            <FoodForm
-              key={editing?.id || "new"}
-              food={editing || undefined}
-              onCancel={back}
-              onDirtyChange={() => setDirty(true)}
-              onSaved={() => {
-                setEditing(undefined);
-                setDirty(false);
-              }}
-            />
-            {editing && (
-              <div className="library-delete">
-                <Button
-                  variant="destructive"
-                  onClick={() => void removeFood()}
-                  disabled={deleting}
-                >
-                  <SavingLabel saving={deleting}>
-                    <Trash2 size={16} />
-                    Delete food
-                  </SavingLabel>
-                </Button>
-                <ErrorNotice error={error} />
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      ) : (
+        <div className="sheet-scroll">
+          <FoodForm
+            key={editing?.id || "new"}
+            food={editing || undefined}
+            onCancel={back}
+            onDirtyChange={() => setDirty(true)}
+            onSaved={() => {
+              setEditing(undefined);
+              setDirty(false);
+            }}
+          />
+          {editing && (
+            <div className="library-delete">
+              <Button
+                variant="destructive"
+                onClick={() => void removeFood()}
+                disabled={deleting}
+              >
+                <SavingLabel saving={deleting}>
+                  <Trash2 size={16} />
+                  Delete food
+                </SavingLabel>
+              </Button>
+              <ErrorNotice error={error} />
+            </div>
+          )}
+        </div>
+      )}
     </Sheet>
   );
 }

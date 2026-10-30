@@ -3,6 +3,10 @@ import { ProviderError } from "./common";
 type Provider = "USDA";
 const unavailableUntil = new Map<Provider, number>();
 
+interface FetchOptions extends RequestInit {
+  next?: { revalidate?: number | false; tags?: string[] };
+}
+
 export function deferProvider(provider: Provider, milliseconds: number): void {
   unavailableUntil.set(provider, Date.now() + milliseconds);
 }
@@ -10,7 +14,7 @@ export function deferProvider(provider: Provider, milliseconds: number): void {
 export async function fetchJson(
   provider: Provider,
   url: string | URL,
-  options: RequestInit = {},
+  options: FetchOptions = {},
 ): Promise<unknown> {
   if ((unavailableUntil.get(provider) ?? 0) > Date.now()) {
     throw new ProviderError(
@@ -22,9 +26,9 @@ export async function fetchJson(
   let response: Response;
   try {
     response = await fetch(url, {
-      ...options,
       cache: "no-store",
       signal: AbortSignal.timeout(12_000),
+      ...options,
     });
   } catch {
     throw new ProviderError(provider, "request failed or timed out.");

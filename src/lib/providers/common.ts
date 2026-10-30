@@ -45,6 +45,10 @@ export function uniqueFoods(foods: Food[]): Food[] {
   return [...new Map(foods.map((food) => [food.id, food])).values()];
 }
 
+export function normalizeSearchQuery(query: string): string {
+  return query.trim().replace(/\s+/g, " ").toLowerCase().slice(0, 120).trim();
+}
+
 export class ProviderError extends Error {
   constructor(
     public readonly provider: "USDA",

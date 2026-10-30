@@ -251,6 +251,7 @@ export async function listFoods(
   accountId: string,
   query: string,
   customOnly: boolean,
+  page = 1,
 ) {
   const q = query.trim().slice(0, 120);
   const conditions = [
@@ -275,13 +276,24 @@ export async function listFoods(
     .from(foods)
     .where(and(...conditions))
     .orderBy(
-      ...(q ? [desc(sql`similarity(lower(${foods.name}), lower(${q}))`)] : []),
+      ...(q
+        ? [
+            asc(sql`case when ${foods.brand} is null then 0 else 1 end`),
+            desc(sql`similarity(lower(${foods.name}), lower(${q}))`),
+          ]
+        : []),
       sql`${foods.lastUsedAt} desc nulls last`,
       desc(foods.updatedAt),
       asc(foods.name),
+      asc(foods.id),
     )
-    .limit(40);
-  return rows.map(foodDto);
+    .limit(21)
+    .offset((page - 1) * 20);
+  return {
+    foods: rows.slice(0, 20).map(foodDto),
+    nextPage: rows.length > 20 ? page + 1 : null,
+    warnings: [],
+  };
 }
 
 export async function saveCustomFood(

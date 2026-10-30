@@ -46,6 +46,8 @@ Food search uses USDA FoodData Central and saved/custom foods. See [provider not
 - Meals are drafts until **Save meal**. Discard leaves the saved meal unchanged. Creating a custom food saves it separately even when the meal draft is later discarded.
 - Food entries store immutable nutrition snapshots. Editing a custom food affects new entries. Editing an existing entry's amount retains its original nutrition. Deleting a custom food archives it; historical meal entries remain intact.
 - External foods are resolved only when selected and saved locally when a meal is saved. Search shows local results after 150 ms and external results after 850 ms. Saved provider foods are deduplicated against external results. Neon `pg_trgm` supports fuzzy local search.
+- Food lists load 20 items at a time as you scroll, with a load-more/retry button available. USDA applies generic-before-branded ordering across all result pages. Search and custom-food lists use nearly full-screen sheets with a fixed search bar and creation action; only the results scroll.
+- Public USDA search pages use a seven-day server cache; details use a 180-day cache. Next.js Data Cache persists upstream responses on Vercel, with bounded in-process caching and coalescing as another layer. Query case/spacing variants share cache entries. Client search/detail caching avoids repeated requests, and local food edits preserve external cache entries. Private app API responses remain `no-store`.
 
 ## Checks
 

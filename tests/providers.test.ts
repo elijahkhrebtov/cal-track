@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { cached } from "../src/lib/providers/cache";
-import { parseUsdaFood } from "../src/lib/providers/usda";
+import { parseUsdaFood, searchUsdaFoods } from "../src/lib/providers/usda";
 import { resolveExternalFood, searchExternalFoods } from "../src/lib/providers";
 
 vi.mock("server-only", () => ({}));
@@ -182,8 +182,10 @@ describe("provider cache", () => {
 describe("external provider requests", () => {
   it("searches USDA once and returns normalized foods without additional requests", async () => {
     vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
-    const fetch = vi.fn(async (_url: string | URL) =>
+    const fetch = vi.fn(async (_url: string | URL, _options?: RequestInit) =>
       Response.json({
+        currentPage: 1,
+        totalPages: 2,
         foods: [
           { fdcId: 123, description: "Chicken", foodNutrients: usdaNutrition },
         ],
@@ -195,11 +197,20 @@ describe("external provider requests", () => {
     expect(result.foods).toHaveLength(1);
     expect(result.foods[0]?.source).toBe("usda");
     expect(result.warnings).toEqual([]);
+    expect(result.nextPage).toBe(2);
     expect(fetch).toHaveBeenCalledTimes(1);
     const endpoint = new URL(fetch.mock.calls[0]?.[0] as unknown as URL);
     expect(endpoint.hostname).toBe("api.nal.usda.gov");
     expect(endpoint.pathname).toBe("/fdc/v1/foods/search");
     expect(endpoint.searchParams.get("query")).toBe("request success fixture");
+    expect(endpoint.searchParams.get("pageSize")).toBe("20");
+    expect(endpoint.searchParams.get("pageNumber")).toBe("1");
+    expect(endpoint.searchParams.get("sortBy")).toBe("dataType.keyword");
+    expect(endpoint.searchParams.get("sortOrder")).toBe("desc");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      cache: "force-cache",
+      next: { revalidate: 604_800, tags: ["usda-foods"] },
+    });
   });
 
   it("returns a sanitized warning when the USDA network request fails", async () => {
@@ -216,6 +227,7 @@ describe("external provider requests", () => {
     const result = await searchExternalFoods("request failure fixture");
     expect(result.foods).toEqual([]);
     expect(result.warnings).toEqual(["USDA: request failed or timed out."]);
+    expect(result.nextPage).toBeNull();
     expect(JSON.stringify(result)).not.toContain("test-private-usda-key");
     expect(JSON.stringify(result)).not.toContain("https://");
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -232,6 +244,7 @@ describe("external provider requests", () => {
     expect(result).toEqual({
       foods: [],
       warnings: ["USDA: access denied; check the API key."],
+      nextPage: null,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -242,13 +255,14 @@ describe("external provider requests", () => {
     expect(await searchExternalFoods(" a ")).toEqual({
       foods: [],
       warnings: [],
+      nextPage: null,
     });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("resolves only the selected USDA detail record", async () => {
     vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
-    const fetch = vi.fn(async (_url: string | URL) =>
+    const fetch = vi.fn(async (_url: string | URL, _options?: RequestInit) =>
       Response.json({
         fdcId: 321,
         description: "Chicken",
@@ -263,6 +277,10 @@ describe("external provider requests", () => {
     const endpoint = new URL(fetch.mock.calls[0]?.[0] as unknown as URL);
     expect(endpoint.hostname).toBe("api.nal.usda.gov");
     expect(endpoint.pathname).toBe("/fdc/v1/food/321");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      cache: "force-cache",
+      next: { revalidate: 15_552_000, tags: ["usda-foods"] },
+    });
   });
 
   it("rejects external identifiers before making a request", async () => {
@@ -275,7 +293,228 @@ describe("external provider requests", () => {
   });
 });
 
+describe("USDA pagination and caching", () => {
+  it("keeps page caches separate and uses the same global sort on every page", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    const fetch = vi.fn(async (url: string | URL) => {
+      const page = Number(new URL(url).searchParams.get("pageNumber"));
+      return Response.json({
+        currentPage: page,
+        totalPages: 2,
+        totalHits: 40,
+        foods: [
+          {
+            fdcId: 1000 + page,
+            description: `Page ${page}`,
+            foodNutrients: usdaNutrition,
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const first = await searchExternalFoods("paginated fixture", 1);
+    const second = await searchExternalFoods("paginated fixture", 2);
+    expect(first.nextPage).toBe(2);
+    expect(first.foods[0]?.id).toBe("usda:1001");
+    expect(second.nextPage).toBeNull();
+    expect(second.foods[0]?.id).toBe("usda:1002");
+    expect(await searchExternalFoods("paginated fixture", 1)).toEqual(first);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const [url] of fetch.mock.calls) {
+      const endpoint = new URL(url);
+      expect(endpoint.searchParams.get("sortBy")).toBe("dataType.keyword");
+      expect(endpoint.searchParams.get("sortOrder")).toBe("desc");
+    }
+  });
+
+  it("shares a cache and pending request across case and whitespace variants", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    const fetch = vi.fn(async (_url: string | URL) =>
+      Response.json({ foods: [] }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const [first, second] = await Promise.all([
+      searchExternalFoods("  CACHE   Canonical Fixture "),
+      searchExternalFoods("cache canonical fixture"),
+    ]);
+    expect(first).toEqual(second);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new URL(fetch.mock.calls[0]![0]).searchParams.get("query")).toBe(
+      "cache canonical fixture",
+    );
+    expect(await searchExternalFoods("CACHE CANONICAL FIXTURE")).toEqual(first);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the next page when every current-page row has incomplete nutrition", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          currentPage: 1,
+          totalPages: 3,
+          foods: [{ fdcId: 100, description: "Incomplete" }],
+        }),
+      ),
+    );
+    expect(await searchUsdaFoods("incomplete metadata fixture")).toEqual({
+      foods: [],
+      nextPage: 2,
+    });
+  });
+
+  it("falls back to totalHits when totalPages is missing", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          currentPage: 2,
+          totalHits: 41,
+          foods: [{ fdcId: 100, description: "Incomplete" }],
+        }),
+      ),
+    );
+    expect(await searchUsdaFoods("total hits fixture", 2)).toEqual({
+      foods: [],
+      nextPage: 3,
+    });
+  });
+
+  it("uses the raw record count for pagination when metadata is missing", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          foods: Array.from({ length: 20 }, (_, index) => ({
+            fdcId: index + 1,
+            description: "Incomplete",
+          })),
+        }),
+      ),
+    );
+    expect(await searchUsdaFoods("raw count fixture")).toEqual({
+      foods: [],
+      nextPage: 2,
+    });
+  });
+
+  it("stops at a short raw page when no metadata is available", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          foods: Array.from({ length: 19 }, (_, index) => ({
+            fdcId: index + 1,
+            description: "Incomplete",
+          })),
+        }),
+      ),
+    );
+    expect(await searchUsdaFoods("last raw count fixture", 2)).toEqual({
+      foods: [],
+      nextPage: null,
+    });
+  });
+
+  it("rejects nonpositive or noninteger page numbers without upstream requests", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    for (const page of [0, -1, 1.5, Infinity, NaN]) {
+      expect(await searchExternalFoods("invalid page fixture", page)).toEqual({
+        foods: [],
+        warnings: ["USDA: invalid search page."],
+        nextPage: null,
+      });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed page instead of caching the warning", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network failed"))
+      .mockResolvedValueOnce(
+        Response.json({ foods: [], totalPages: 2, currentPage: 2 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    expect(
+      (await searchExternalFoods("retry page fixture", 2)).warnings,
+    ).toHaveLength(1);
+    expect(await searchExternalFoods("retry page fixture", 2)).toEqual({
+      foods: [],
+      warnings: [],
+      nextPage: null,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps search pages for seven days and reloads after expiry", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.useFakeTimers();
+    const start = Date.UTC(2026, 0, 1);
+    vi.setSystemTime(start);
+    const fetch = vi.fn(async () =>
+      Response.json({ foods: [], totalPages: 0 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await searchExternalFoods("search ttl fixture");
+    vi.setSystemTime(start + 604_799_000);
+    await searchExternalFoods("search ttl fixture");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(start + 604_800_000);
+    await searchExternalFoods("search ttl fixture");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps details for 180 days and reloads after expiry", async () => {
+    vi.stubEnv("USDA_FDC_API_KEY", "test-usda-key");
+    vi.useFakeTimers();
+    const start = Date.UTC(2026, 0, 1);
+    vi.setSystemTime(start);
+    const fetch = vi.fn(async () =>
+      Response.json({
+        fdcId: 765,
+        description: "Chicken",
+        foodNutrients: usdaNutrition,
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await resolveExternalFood("usda", "765");
+    vi.setSystemTime(start + 15_551_999_000);
+    await resolveExternalFood("usda", "765");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(start + 15_552_000_000);
+    await resolveExternalFood("usda", "765");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("USDA rate limits", () => {
+  it("defaults the shared HTTP helper to no-store", async () => {
+    vi.resetModules();
+    const { fetchJson } = await import("../src/lib/providers/http");
+    const fetch = vi.fn(async (_url: string | URL, _options?: RequestInit) =>
+      Response.json({ ok: true }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      fetchJson("USDA", "https://example.test/food"),
+    ).resolves.toEqual({ ok: true });
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      cache: "no-store",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("honors Retry-After without sending more requests during cooldown", async () => {
     vi.resetModules();
     vi.useFakeTimers();

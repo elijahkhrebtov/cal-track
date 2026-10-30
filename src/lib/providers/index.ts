@@ -1,20 +1,22 @@
 import "server-only";
 
-import type { Food } from "../types";
-import { ProviderError, uniqueFoods } from "./common";
+import type { Food, FoodSearchPage } from "../types";
+import { normalizeSearchQuery, ProviderError, uniqueFoods } from "./common";
 import { resolveUsdaFood, searchUsdaFoods } from "./usda";
 
 export async function searchExternalFoods(
   query: string,
-): Promise<{ foods: Food[]; warnings: string[] }> {
-  const normalized = query.trim().replace(/\s+/g, " ").slice(0, 120);
-  if (normalized.length < 2) return { foods: [], warnings: [] };
+  page = 1,
+): Promise<FoodSearchPage> {
+  const normalized = normalizeSearchQuery(query);
+  if (normalized.length < 2) return { foods: [], warnings: [], nextPage: null };
   try {
-    const foods = await searchUsdaFoods(normalized);
-    return { foods: uniqueFoods(foods), warnings: [] };
+    const result = await searchUsdaFoods(normalized, page);
+    return { ...result, foods: uniqueFoods(result.foods), warnings: [] };
   } catch (error) {
     return {
       foods: [],
+      nextPage: null,
       warnings: [
         error instanceof ProviderError
           ? error.message

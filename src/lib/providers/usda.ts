@@ -4,6 +4,7 @@ import {
   completeNutrients,
   list,
   number,
+  normalizeSearchQuery,
   object,
   ProviderError,
   rounded,
@@ -13,6 +14,9 @@ import {
 import { fetchJson } from "./http";
 
 const BASE_URL = "https://api.nal.usda.gov/fdc/v1";
+const PAGE_SIZE = 20;
+const SEARCH_CACHE_SECONDS = 7 * 24 * 60 * 60;
+const DETAIL_CACHE_SECONDS = 180 * 24 * 60 * 60;
 
 function nutrientAmount(
   nutrients: unknown[],
@@ -154,27 +158,75 @@ function url(path: string): URL {
   return result;
 }
 
-export async function searchUsdaFoods(query: string): Promise<Food[]> {
-  return cached(`usda:search:${query.toLowerCase()}`, 15 * 60_000, async () => {
-    const endpoint = url("/foods/search");
-    endpoint.searchParams.set("query", query);
-    endpoint.searchParams.set("pageSize", "15");
-    endpoint.searchParams.set("pageNumber", "1");
-    const payload = object(await fetchJson("USDA", endpoint));
-    const foods: Food[] = [];
-    for (const row of list(payload.foods)) {
-      try {
-        foods.push(parseUsdaFood(row));
-      } catch {
-        // A search record missing macros should not look like a zero-calorie food.
+export async function searchUsdaFoods(
+  query: string,
+  page = 1,
+): Promise<{ foods: Food[]; nextPage: number | null }> {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new ProviderError("USDA", "invalid search page.");
+  }
+  const normalized = normalizeSearchQuery(query);
+  if (normalized.length < 2) return { foods: [], nextPage: null };
+  return cached(
+    `usda:search:v2:${normalized}:${page}`,
+    SEARCH_CACHE_SECONDS * 1000,
+    async () => {
+      const endpoint = url("/foods/search");
+      endpoint.searchParams.set("query", normalized);
+      endpoint.searchParams.set("pageSize", String(PAGE_SIZE));
+      endpoint.searchParams.set("pageNumber", String(page));
+      // USDA applies this ordering before pagination, keeping all generic data
+      // types (Survey, SR Legacy, Foundation) ahead of Branded across pages.
+      endpoint.searchParams.set("sortBy", "dataType.keyword");
+      endpoint.searchParams.set("sortOrder", "desc");
+      const payload = object(
+        await fetchJson("USDA", endpoint, {
+          cache: "force-cache",
+          next: { revalidate: SEARCH_CACHE_SECONDS, tags: ["usda-foods"] },
+        }),
+      );
+      const rows = list(payload.foods);
+      const foods: Food[] = [];
+      for (const row of rows) {
+        try {
+          foods.push(parseUsdaFood(row));
+        } catch {
+          // A search record missing macros should not look like a zero-calorie food.
+        }
       }
-    }
-    return foods;
-  });
+      const totalPages = number(payload.totalPages);
+      const totalHits = number(payload.totalHits);
+      const currentPage = number(payload.currentPage);
+      const resolvedPage =
+        currentPage !== null &&
+        Number.isInteger(currentPage) &&
+        currentPage >= 1
+          ? currentPage
+          : page;
+      const hasMore =
+        totalPages !== null && Number.isInteger(totalPages)
+          ? resolvedPage < totalPages
+          : totalHits !== null
+            ? resolvedPage * PAGE_SIZE < totalHits
+            : rows.length >= PAGE_SIZE;
+      // Use provider metadata or the raw record count, never the parsed count:
+      // incomplete foods on one page must not hide usable foods on later pages.
+      return { foods, nextPage: hasMore ? page + 1 : null };
+    },
+  );
 }
 
 export async function resolveUsdaFood(externalId: string): Promise<Food> {
-  return cached(`usda:food:${externalId}`, 24 * 60 * 60_000, async () => {
-    return parseUsdaFood(await fetchJson("USDA", url(`/food/${externalId}`)));
-  });
+  return cached(
+    `usda:food:${externalId}`,
+    DETAIL_CACHE_SECONDS * 1000,
+    async () => {
+      return parseUsdaFood(
+        await fetchJson("USDA", url(`/food/${externalId}`), {
+          cache: "force-cache",
+          next: { revalidate: DETAIL_CACHE_SECONDS, tags: ["usda-foods"] },
+        }),
+      );
+    },
+  );
 }

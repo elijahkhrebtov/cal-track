@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { ApiError, request } from "@/components/api";
+import { DashboardSkeleton } from "@/components/loading";
 import {
   ErrorNotice,
   Field,
@@ -441,15 +442,12 @@ function MealsCard({
       </div>
       {meals.length ? (
         <div className="meal-list">
-          {meals.map((meal, index) => (
+          {meals.map((meal) => (
             <button
               className="meal-row"
               onClick={() => onEdit(meal)}
               key={meal.id}
             >
-              <span className="meal-index">
-                {String(index + 1).padStart(2, "0")}
-              </span>
               <span className="meal-row-content">
                 <span className="meal-name">{meal.name}</span>
                 <MacroLine values={meal} />
@@ -745,10 +743,7 @@ function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
           onChange={setSelected}
         />
         {result.isPending ? (
-          <div className="dashboard-loading">
-            <LoaderCircle size={22} className="spin" />
-            <span>Loading day</span>
-          </div>
+          <DashboardSkeleton />
         ) : result.error ? (
           <div className="card error-card">
             <ErrorNotice error={result.error} />
