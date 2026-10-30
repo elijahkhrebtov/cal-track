@@ -1,0 +1,64 @@
+Personal meal tracker app
+
+Create simple personal app to track meals, their calories and nutrients and project weight loss. This version has to only work for weight loss.
+
+Screens/views:
+ - login
+ - initial measurements
+ - main
+ - meal entry creation
+   - main form
+   - add food item, search
+   - add food item, details
+   - add food item, create new item
+ - custom foods list
+
+Login:
+This is my personal app that will never go public. Login is just a field for a pregenerated secret string, just to block any unlikely people who can find the app.
+The secret string is in ./app-login-secret. create "an account" with it straight away in the db. the logged in session has to be persisted for as long as possible. probably through http-only cookie (suggest something better).
+
+Initial measurements:
+If they don't exist in db present screen for me to enter sex, age, current weight, target weight. The app then needs to calculate maintenance calories and three limits: for mild, steady and extreme weight loss. Those values needs to be saved. Perform research for how to calculate those values. I propose using several available methods and averaging them out
+I need to be able to adjust current/target weight, and it has to be saved as a separate entries. All calulactions, including calory targets and those described further, need to work from the latest values in relation to those calulations.
+
+Main:
+Shows stats for given date. Defaults to today.
+  Sections stacked vertically:
+  - Date. Arrows to scroll dates forward/backward. Tap to open calendar and select specific date. Date range is limited to the start date (when initial measurements were added) and today (including). No need to be able to select future dates
+  - Date's calories out of limit. The limit's are calculated from the latest weight/target update. Color coded depening on deficit/proficit. The limit is always the steady weight loss. The section also shows maintenance, mild and extreme numbers as smaller reference. Color codes: <= extreme = muted grey (too little), > extreme && <= steady = in the green, > steady && < mild = light orange (caution), >= mild && < maintenance = orange (warning), >= maintenance = red (danger)
+  - Date's macros out of target/limit (the target macroes are moderate low-carb diet)
+  - Compact list of meals with their calories and macroes. Added ass created. Clicking an entry opens meal creation form for editing
+  - Deficit/proficit color coded bar chart showing past seven days plus today (each bar has the same color coding as the current calory number)
+  - Summary section showing average deficit/proficit for the past seven days and projecteda weight loss rate and the date when target weight will be achieved assuming the same average deficit
+  - Update current/target weight button. Opens bottom sheet with the form
+  - Floating plus button for logging a meal. Opens meal entry creation view
+
+Meal entry creation:
+ - Editable name field. Defaults to "Meal <meal number for the day>"
+ - Current meal calories and macroes from already added foods
+ - List of added food entries
+ - Buttons "add food" and "custom food"
+    Add food:
+    - Default view: List of recent foods
+    - At the top: search bar (not focused by default). Typing in the bar replaces recent foods with search results from both apis and the db with the source badge (usda, fatsecret, custom). The last item in the list is an "add food" button. clicking opens "add food" vie
+    - Taping on food opens details (probably just bottom sheet) where I can select units and amount for th eentry
+    Custom food:
+    - Form with food name, calories and macroes. Macros fields are in this order: protein, fat, carbs. These values are always for 100g. Additional serving sizes can be added by pressing appropriate plus button. It adds text field for serving size name and the size in gramms. Pressing save, saves new food to the db and opens "details" bottom sheet to enter food entry details
+
+Custom foods:
+ - List of custom foods with search through them only
+ - Taping on item brings food creation form alowwing to edit an item
+
+Some random notes:
+ - By food entry I mean an instance of food eaten in a specific meal with it's specific amount. The base food information is a food item
+ - Food items from apis have to be saved to my db when used in a food entry
+ - I only care about calories and base macroes in a food item, nothing else
+ - I use two free apis with rate limits. search field needs to search my items first (custom and duplicated) and have larger debounce for api calls
+
+UI:
+No promo text. Dry, minimal and to the point text and labels. Dark mode only. Greenish accent color.
+
+Stack:
+Nextjs, Drizzle, Tanstack query, Shadcn, Tailwind. Use eslint/oxlint adn prettier. code needs to be formatted and human readable
+API reference is in reference.txt. .env has required keys
+Neon DB probably needs a fuzzy search plugin

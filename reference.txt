@@ -1,0 +1,3 @@
+https://platform.fatsecret.com/docs/v1/foods.search
+
+https://app.swaggerhub.com/proxy/https://api.nal.usda.gov/fdc/v1/json-spec?api_key=
