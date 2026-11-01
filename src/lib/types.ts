@@ -45,6 +45,18 @@ export interface MealEntry extends Nutrients {
   grams: number;
   quantity: number;
   servingName: string;
+  recipe?: { id: string; recipeId: string; name: string };
+}
+
+export interface Recipe extends Nutrients {
+  id: string;
+  name: string;
+  entries: MealEntry[];
+}
+
+export interface RecipeSearchPage {
+  recipes: Recipe[];
+  nextPage: number | null;
 }
 
 export interface Meal extends Nutrients {

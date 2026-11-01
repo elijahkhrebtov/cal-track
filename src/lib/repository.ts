@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
-import { dayCompletions, foods, meals, measurements } from "@/lib/db/schema";
+import {
+  dayCompletions,
+  foods,
+  meals,
+  measurements,
+  recipes,
+} from "@/lib/db/schema";
 import { addDays, daysBefore, todayInTashkent } from "@/lib/dates";
 import { HttpError } from "@/lib/http";
 import {
@@ -21,10 +27,13 @@ import type {
   Meal,
   MealEntry,
   Measurement,
+  Recipe,
 } from "@/lib/types";
 import type {
   customFoodSchema,
   mealSchema,
+  foodEntrySchema,
+  recipeSchema,
   measurementSchema,
 } from "@/lib/validation";
 
@@ -448,7 +457,7 @@ export async function getResolvedFood(
 
 async function canonicalFood(
   accountId: string,
-  ref: z.infer<typeof mealSchema>["entries"][number]["food"],
+  ref: z.infer<typeof foodEntrySchema>["food"],
 ): Promise<Food> {
   const uuid = z.uuid().safeParse(ref.id);
   if (uuid.success) {
@@ -490,24 +499,21 @@ async function canonicalFood(
   return foodDto(row);
 }
 
-export async function saveMeal(
+async function canonicalEntries(
   accountId: string,
-  input: z.infer<typeof mealSchema>,
-) {
-  await assertDateInRange(accountId, input.date);
-  const [existing] = input.id
-    ? await getDb()
-        .select()
-        .from(meals)
-        .where(and(eq(meals.id, input.id), eq(meals.accountId, accountId)))
-        .limit(1)
-    : [];
-  if (input.id && !existing) throw new HttpError(404, "Meal not found.");
+  input: z.infer<typeof foodEntrySchema>[],
+  existing: MealEntry[] = [],
+  foodCache = new Map<string, Food>(),
+): Promise<MealEntry[]> {
   const entries: MealEntry[] = [];
-  const foodCache = new Map<string, Food>();
-  for (const entry of input.entries) {
-    const original = existing?.entries.find(
-      (item) => item.id === entry.id && item.food.id === entry.food.id,
+  const usedIds = new Set<string>();
+  for (const entry of input) {
+    if (entry.id && usedIds.has(entry.id))
+      throw new HttpError(400, "Duplicate entry.");
+    if (entry.id) usedIds.add(entry.id);
+    const original = existing.find(
+      (item) =>
+        !item.recipe && item.id === entry.id && item.food.id === entry.food.id,
     );
     let food = original?.food ?? foodCache.get(entry.food.id);
     if (!food) {
@@ -523,6 +529,171 @@ export async function saveMeal(
       servingName: entry.servingName,
       ...scaleNutrients(food, entry.grams),
     });
+  }
+  return entries;
+}
+
+function recipeDto(row: typeof recipes.$inferSelect): Recipe {
+  return {
+    id: row.id,
+    name: row.name,
+    entries: row.entries,
+    ...sumNutrients(row.entries),
+  };
+}
+
+export async function listRecipes(accountId: string, query: string, page = 1) {
+  const q = query
+    .trim()
+    .slice(0, 120)
+    .replace(/[\\%_]/g, "\\$&");
+  const rows = await getDb()
+    .select()
+    .from(recipes)
+    .where(
+      and(
+        eq(recipes.accountId, accountId),
+        eq(recipes.archived, false),
+        q ? ilike(recipes.name, `%${q}%`) : undefined,
+      ),
+    )
+    .orderBy(asc(recipes.name), asc(recipes.id))
+    .limit(21)
+    .offset((page - 1) * 20);
+  return {
+    recipes: rows.slice(0, 20).map(recipeDto),
+    nextPage: rows.length > 20 ? page + 1 : null,
+  };
+}
+
+export async function getRecipe(
+  accountId: string,
+  id: string,
+): Promise<Recipe> {
+  const [row] = await getDb()
+    .select()
+    .from(recipes)
+    .where(
+      and(
+        eq(recipes.id, id),
+        eq(recipes.accountId, accountId),
+        eq(recipes.archived, false),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new HttpError(404, "Recipe not found.");
+  return recipeDto(row);
+}
+
+export async function saveRecipe(
+  accountId: string,
+  input: z.infer<typeof recipeSchema>,
+) {
+  const existing = input.id ? await getRecipe(accountId, input.id) : undefined;
+  const entries = await canonicalEntries(
+    accountId,
+    input.entries,
+    existing?.entries,
+  );
+  const [row] = existing
+    ? await getDb()
+        .update(recipes)
+        .set({ name: input.name, entries, updatedAt: new Date() })
+        .where(
+          and(
+            eq(recipes.id, existing.id),
+            eq(recipes.accountId, accountId),
+            eq(recipes.archived, false),
+          ),
+        )
+        .returning()
+    : await getDb()
+        .insert(recipes)
+        .values({ accountId, name: input.name, entries })
+        .returning();
+  if (!row) throw new HttpError(404, "Recipe not found.");
+  return recipeDto(row);
+}
+
+export async function deleteRecipe(accountId: string, id: string) {
+  const [row] = await getDb()
+    .update(recipes)
+    .set({ archived: true, updatedAt: new Date() })
+    .where(
+      and(
+        eq(recipes.id, id),
+        eq(recipes.accountId, accountId),
+        eq(recipes.archived, false),
+      ),
+    )
+    .returning({ id: recipes.id });
+  if (!row) throw new HttpError(404, "Recipe not found.");
+}
+
+export async function saveMeal(
+  accountId: string,
+  input: z.infer<typeof mealSchema>,
+) {
+  await assertDateInRange(accountId, input.date);
+  const [existing] = input.id
+    ? await getDb()
+        .select()
+        .from(meals)
+        .where(and(eq(meals.id, input.id), eq(meals.accountId, accountId)))
+        .limit(1)
+    : [];
+  if (input.id && !existing) throw new HttpError(404, "Meal not found.");
+  const entries: MealEntry[] = [];
+  const usedIds = new Set<string>();
+  const foodCache = new Map<string, Food>();
+  for (const entry of input.entries) {
+    if (entry.id && usedIds.has(entry.id))
+      throw new HttpError(400, "Duplicate entry.");
+    if (entry.id) usedIds.add(entry.id);
+    if ("recipeId" in entry) {
+      const original = existing?.entries.filter(
+        (item) =>
+          entry.id &&
+          item.recipe?.id === entry.id &&
+          item.recipe?.recipeId === entry.recipeId,
+      );
+      if (original?.length) {
+        entries.push(...original);
+      } else {
+        const recipe = await getRecipe(accountId, entry.recipeId);
+        const group = {
+          id: randomUUID(),
+          recipeId: recipe.id,
+          name: recipe.name,
+        };
+        entries.push(
+          ...recipe.entries.map((item) => ({
+            ...item,
+            id: randomUUID(),
+            recipe: group,
+          })),
+        );
+      }
+    } else {
+      if (
+        existing?.entries.some((item) => item.id === entry.id && item.recipe)
+      ) {
+        throw new HttpError(
+          400,
+          "Manage recipe ingredients in the recipe library.",
+        );
+      }
+      entries.push(
+        ...(await canonicalEntries(
+          accountId,
+          [entry],
+          existing?.entries,
+          foodCache,
+        )),
+      );
+    }
+    if (entries.length > 1000)
+      throw new HttpError(400, "A meal can contain up to 1,000 foods.");
   }
   // One atomic row contains the complete meal and its immutable entry snapshots.
   const [row] = existing

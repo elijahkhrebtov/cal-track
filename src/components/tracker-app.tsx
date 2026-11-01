@@ -1,5 +1,7 @@
 "use client";
 
+import { RecipeEditor, RecipeLibrary } from "@/components/recipe-workspace";
+
 import { useEffect, useState, type FormEvent } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -756,6 +758,7 @@ function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
     ? pathname.split("/")[2]
     : null;
   const library = pathname.startsWith("/custom-foods");
+  const recipeLibrary = pathname === "/custom-foods/recipes";
   const result = useQuery({
     queryKey: ["dashboard", date],
     queryFn: ({ signal }) =>
@@ -872,7 +875,13 @@ function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
           )}
         </WorkflowPage>
       )}
-      {library && <CustomFoodLibrary onClose={() => goBack(homePath)} />}
+      {library &&
+        (recipeLibrary ? (
+          <RecipeLibrary onClose={() => goBack(homePath)} />
+        ) : (
+          <CustomFoodLibrary onClose={() => goBack(homePath)} />
+        ))}
+      {pathname.startsWith("/recipes/") && <RecipeEditor />}
       {measurements && data && (
         <Sheet open onOpenChange={setMeasurements} title="Update measurements">
           <div className="sheet-scroll">

@@ -147,7 +147,10 @@ test("custom foods paginate in the list while the creation action remains availa
     page.getByRole("button", { name: /^Custom food \d+ Custom$/ }),
   ).toHaveCount(20);
   expect(requested).toEqual([1]);
-  const list = page.getByLabel("Custom food results", { exact: true });
+  const list = page.getByRole("tabpanel", {
+    name: "Custom foods",
+    exact: true,
+  });
   await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });

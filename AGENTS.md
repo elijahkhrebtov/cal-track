@@ -62,6 +62,41 @@ Never commit or print `.env`, `app-login-secret`, database URLs, API keys, sessi
 
 For schema changes, update the Drizzle schema and generate a new migration with `npm run db:generate`. Keep migration metadata consistent and retain `pg_trgm` support. Do not rewrite applied migrations. `npm run db:migrate` applies each migration and its journal entry atomically. Database commands operate on the configured Neon database; preserve personal data and avoid unrelated changes.
 
+## Phone preview through Windows/WSL
+
+Use one Next.js development server on port **3000**, listening on `0.0.0.0` (already set by `npm run dev`). Keep port **3100** for temporary production/Playwright checks; stop any test server you started when finished and leave the phone's dev server running.
+
+The verified LAN setup used computer IP `192.168.1.191`, subnet `192.168.1.0/24`, and a Windows proxy on **3001** forwarding to WSL's **3000**. These addresses are examples from the working setup: check the computer's current LAN IPv4 with `ip -brief addr` or Windows `Get-NetIPAddress -AddressFamily IPv4` before reusing them. The phone must be on the same LAN. Its own `localhost` refers to the phone.
+
+Start the dev server from WSL with the computer's LAN IP allowed:
+
+```sh
+DEV_ALLOWED_ORIGINS=192.168.1.191 npm run dev -- --port 3000
+```
+
+`next.config.ts` reads comma-separated `DEV_ALLOWED_ORIGINS`. Use hostnames/IPs only, without a scheme or port, and restart the dev server after changing it. This is required even when using a proxy: Next's dev-only resources and HMR WebSocket validate the browser's origin. A blocked `/_next/hmr` connection can leave the app on an endless loading spinner even though the HTML returns HTTP 200.
+
+Inspect existing configuration with `netsh interface portproxy show v4tov4` and `Get-NetFirewallRule -Name Intake-Dev-Proxy-3001-LAN`. Reuse matching configuration. For missing configuration, run the following in **Windows PowerShell as Administrator**, replacing the example IP/subnet as needed:
+
+```powershell
+$intakeLanIp = '192.168.1.191'
+$intakeLanSubnet = '192.168.1.0/24'
+
+netsh interface portproxy add v4tov4 "listenaddress=$intakeLanIp" listenport=3001 connectaddress=127.0.0.1 connectport=3000 protocol=tcp
+
+New-NetFirewallRule -Name 'Intake-Dev-Proxy-3001-LAN' `
+  -DisplayName 'Intake dev proxy 3001 (local network)' `
+  -Direction Inbound -Action Allow -Protocol TCP `
+  -LocalAddress $intakeLanIp -LocalPort 3001 `
+  -RemoteAddress $intakeLanSubnet -Profile Any
+```
+
+Keep the firewall exception limited to that port and LAN subnet. Update the proxy and firewall addresses if the computer's LAN IP changes. Windows IP Helper (`iphlpsvc`) must be running for the port proxy. A separate WSL Hyper-V allow rule for port 3000 was insufficient by itself in this workspace; the Windows proxy plus its host firewall rule is the verified path. Windows commands invoked from the WSL sandbox may require tool escalation; `UtilBindVsockAnyPort: socket failed` indicates blocked Windows interop, not an app error.
+
+Open **`http://192.168.1.191:3001`** on the phone, using the current computer IP and explicit `http://`. Verify the sign-in screen or signed-in dashboard actually renders, then test navigation and adding a meal draft. Check the HMR WebSocket through the proxy as well as the HTML response; an unauthenticated `/api/bootstrap` returning 401 is expected. Firefox mobile was verified; Chrome previously showed `ERR_TOO_MANY_RETRIES` while Firefox reached the same proxy, so distinguish browser-specific failures from server failures.
+
+Use dev mode for this HTTP preview: production uses Secure session cookies and enables the service worker. Keep using `src/lib/draft-id.ts` for client draft IDs, since `crypto.randomUUID()` is unavailable on insecure HTTP LAN origins. Previewing the existing app does not require database migrations or seeding.
+
 ## Validation and workflow
 
 Run checks appropriate to the change:

@@ -137,6 +137,28 @@ export const meals = pgTable(
   ],
 );
 
+export const recipes = pgTable(
+  "recipes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    entries: jsonb("entries").$type<MealEntry[]>().notNull(),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("recipes_account_name_idx").on(table.accountId, table.name),
+  ],
+);
+
 export const dayCompletions = pgTable(
   "day_completions",
   {

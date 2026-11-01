@@ -40,19 +40,35 @@ export const foodReferenceSchema = z.object({
   externalId: z.string().max(100).nullable(),
 });
 
+export const foodEntrySchema = z.object({
+  id: z.string().min(1).max(100).optional(),
+  food: foodReferenceSchema,
+  grams: z.number().finite().positive().max(100_000),
+  quantity: z.number().finite().positive().max(100_000),
+  servingName: z.string().trim().min(1).max(100),
+});
+
+export const recipeSchema = z.object({
+  id: z.uuid().optional(),
+  name: z.string().trim().min(1).max(120),
+  entries: z.array(foodEntrySchema).min(1, "Add at least one food.").max(100),
+});
+
 export const mealSchema = z.object({
   id: z.uuid().optional(),
   date: dateSchema,
   name: z.string().trim().min(1).max(120),
   entries: z
     .array(
-      z.object({
-        id: z.string().max(100).optional(),
-        food: foodReferenceSchema,
-        grams: z.number().finite().positive().max(100_000),
-        quantity: z.number().finite().positive().max(100_000),
-        servingName: z.string().trim().min(1).max(100),
-      }),
+      z.union([
+        z
+          .object({
+            id: z.string().min(1).max(100).optional(),
+            recipeId: z.uuid(),
+          })
+          .strict(),
+        foodEntrySchema,
+      ]),
     )
     .min(1, "Add at least one food.")
     .max(100),

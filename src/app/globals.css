@@ -1071,7 +1071,8 @@ input[type="date"] {
 }
 .food-search-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 4px;
   margin-top: 14px;
   padding: 4px;
@@ -1952,4 +1953,34 @@ input[type="date"] {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.recipe-entry-group {
+  border-bottom: 1px solid #343434;
+}
+.recipe-entry-group:last-child {
+  border-bottom: 0;
+}
+.recipe-entry-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.recipe-entry-name > svg {
+  flex-shrink: 0;
+  color: var(--green);
+}
+.recipe-ingredients {
+  padding: 0 0 8px 36px;
+}
+.recipe-search-row {
+  cursor: default;
+}
+
+.recipe-entry-group > .entry-row {
+  border-bottom: 0;
+  padding: 15px 0;
+}
+.recipe-ingredients > .entry-row {
+  padding: 10px 0;
 }
