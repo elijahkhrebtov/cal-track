@@ -12,6 +12,7 @@ import {
 } from "@/components/drafts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { draftId } from "@/lib/draft-id";
 import type { Food, Measurement, MeasurementInput, Serving } from "@/lib/types";
 
 export function Field({
@@ -339,7 +340,12 @@ export function FoodForm({
             ["carbs", "Carbs"],
           ] as const
         ).map(([key, label]) => (
-          <Field key={key} label={label} hint="g">
+          <Field
+            key={key}
+            label={label}
+            hint="g"
+            className={`macro-field macro-${key}`}
+          >
             <Input
               type="number"
               required
@@ -422,7 +428,7 @@ export function FoodForm({
           onDirtyChange?.();
           setServings((previous) => [
             ...previous,
-            { id: crypto.randomUUID(), name: "", grams: "" },
+            { id: draftId(), name: "", grams: "" },
           ]);
         }}
       >

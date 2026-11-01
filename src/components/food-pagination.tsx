@@ -6,10 +6,10 @@ import { request } from "@/components/api";
 import { ErrorNotice } from "@/components/forms";
 import { FoodListSkeleton } from "@/components/loading";
 import { Button } from "@/components/ui/button";
-import type { Food, FoodSearchPage } from "@/lib/types";
+import type { Food, FoodSearchPage, FoodSearchResult } from "@/lib/types";
 
 export function useFoodPages(
-  kind: "local" | "external" | "custom",
+  kind: "recent" | "local" | "external" | "custom",
   query: string,
   enabled = true,
 ) {
@@ -19,6 +19,7 @@ export function useFoodPages(
     queryFn: ({ signal, pageParam }) => {
       const params = new URLSearchParams({ q: query, page: String(pageParam) });
       if (kind === "custom") params.set("custom", "true");
+      if (kind === "recent") params.set("recent", "true");
       const path = kind === "external" ? "/api/foods/search" : "/api/foods";
       return request<FoodSearchPage>(`${path}?${params}`, { signal });
     },
@@ -42,8 +43,10 @@ export function foodKey(food: Food) {
     : `${food.source}:${food.externalId}`;
 }
 
-export function foodPages(pages: FoodSearchPage[] | undefined): Food[] {
-  const unique = new Map<string, Food>();
+export function foodPages(
+  pages: FoodSearchPage[] | undefined,
+): FoodSearchResult[] {
+  const unique = new Map<string, FoodSearchResult>();
   for (const page of pages ?? []) {
     for (const food of page.foods) {
       const key = foodKey(food);

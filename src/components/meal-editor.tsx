@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Check,
   ChevronRight,
   LoaderCircle,
   Plus,
@@ -23,7 +24,6 @@ import {
 import { FoodListSkeleton } from "@/components/loading";
 import {
   FoodPageLoader,
-  foodKey,
   foodPages,
   useFoodPages,
 } from "@/components/food-pagination";
@@ -38,7 +38,15 @@ import {
   returnTo,
 } from "@/components/workflow-page";
 import { scaleNutrients, sumNutrients } from "@/lib/nutrition";
-import type { Food, Meal, MealEntry, Nutrients } from "@/lib/types";
+import { draftId } from "@/lib/draft-id";
+import type {
+  Food,
+  FoodPortion,
+  FoodSearchResult,
+  Meal,
+  MealEntry,
+  Nutrients,
+} from "@/lib/types";
 
 export function useDebounced<T>(value: T, delay: number) {
   const [debounced, setDebounced] = useState(value);
@@ -56,13 +64,13 @@ export function number(value: number, digits = 0) {
 export function MacroLine({ values }: { values: Nutrients }) {
   return (
     <span className="macro-line">
-      <span>
+      <span className="macro-protein">
         P <b>{number(values.protein, 1)}</b>
       </span>
-      <span>
+      <span className="macro-fat">
         F <b>{number(values.fat, 1)}</b>
       </span>
-      <span>
+      <span className="macro-carbs">
         C <b>{number(values.carbs, 1)}</b>
       </span>
       <span className="macro-unit">g</span>
@@ -77,15 +85,15 @@ export function NutritionStrip({ values }: { values: Nutrients }) {
         <strong>{number(values.calories)}</strong>
         <span>kcal</span>
       </div>
-      <div>
+      <div className="macro-protein">
         <strong>{number(values.protein, 1)}</strong>
         <span>Protein · g</span>
       </div>
-      <div>
+      <div className="macro-fat">
         <strong>{number(values.fat, 1)}</strong>
         <span>Fat · g</span>
       </div>
-      <div>
+      <div className="macro-carbs">
         <strong>{number(values.carbs, 1)}</strong>
         <span>Carbs · g</span>
       </div>
@@ -105,16 +113,35 @@ export function FoodRow({
   food,
   onClick,
   busy,
+  portion,
+  onQuickAdd,
+  quickAdding,
+  added,
 }: {
   food: Food;
   onClick: () => void;
   busy?: boolean;
+  portion?: FoodPortion;
+  onQuickAdd?: () => void;
+  quickAdding?: boolean;
+  added?: boolean;
 }) {
-  return (
-    <button className="food-row" onClick={onClick} disabled={busy}>
+  const details = (
+    <button
+      className="food-row"
+      onClick={onClick}
+      disabled={busy || quickAdding}
+    >
       <span className="food-row-text">
         <span className="food-name">{food.name}</span>
         <span className="food-meta">
+          {portion && (
+            <span className="food-portion">
+              {portion.servingName === "g"
+                ? `${number(portion.grams, 1)} g`
+                : `${number(portion.quantity, 2)} ${portion.servingName} · ${number(portion.grams, 1)} g`}
+            </span>
+          )}
           <SourceBadge source={food.source} />
           {food.brand && <span className="food-brand">{food.brand}</span>}
         </span>
@@ -128,63 +155,138 @@ export function FoodRow({
       </span>
     </button>
   );
+  if (!onQuickAdd) return details;
+  return (
+    <div className="food-quick-row">
+      <Button
+        variant="secondary"
+        size="icon"
+        className="food-quick-add"
+        aria-label={`Quick add ${food.name}`}
+        title={`Quick add ${food.name}`}
+        disabled={busy || quickAdding}
+        onClick={onQuickAdd}
+      >
+        {quickAdding ? (
+          <LoaderCircle size={18} className="spin" />
+        ) : added ? (
+          <Check size={19} />
+        ) : (
+          <Plus size={19} />
+        )}
+      </Button>
+      {details}
+    </div>
+  );
 }
+
+const foodSearchTabs = [
+  { id: "recent", label: "Recent" },
+  { id: "local", label: "My foods" },
+  { id: "external", label: "Food database" },
+] as const;
+type FoodSearchTab = (typeof foodSearchTabs)[number]["id"];
 
 function FoodSearch({
   onSelect,
+  onQuickAdd,
   onCustom,
   draftKey,
 }: {
-  onSelect: (food: Food) => Promise<void>;
+  onSelect: (food: Food, portion?: FoodPortion) => Promise<void>;
+  onQuickAdd: (food: Food, portion: FoodPortion) => Promise<void>;
   onCustom: () => void;
   draftKey: string;
 }) {
   const [query, setQuery] = usePageDraft(`${draftKey}/query`, () => "");
+  const [tab, setTab] = usePageDraft<FoodSearchTab>(
+    `${draftKey}/tab`,
+    () => "recent",
+  );
   const [resolving, setResolving] = useState<string | null>(null);
+  const [quickAdding, setQuickAdding] = useState(false);
+  const selectionInFlight = useRef(false);
+  const [added, setAdded] = useState<{
+    id: string;
+    name: string;
+    count: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!added) return;
+    const timeout = setTimeout(() => setAdded(null), 1600);
+    return () => clearTimeout(timeout);
+  }, [added]);
   const [error, setError] = useState<unknown>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const currentQuery = query.trim().replace(/\s+/g, " ").toLowerCase();
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
-  }, [currentQuery]);
+  }, [currentQuery, tab]);
   const localQuery = useDebounced(currentQuery, 150);
   const externalQuery = useDebounced(currentQuery, 850);
-  const local = useFoodPages("local", localQuery);
+  const local = useFoodPages(
+    tab === "recent" ? "recent" : "local",
+    localQuery,
+    tab !== "external",
+  );
   const remote = useFoodPages(
     "external",
     externalQuery,
-    externalQuery.length >= 2,
+    tab === "external" && externalQuery.length >= 2,
   );
-  const localIsCurrent = localQuery === currentQuery;
-  const remoteIsCurrent = externalQuery === currentQuery;
-  const loadingLocal = !localIsCurrent || local.isPending;
-  const loadingRemote =
-    currentQuery.length >= 2 && (!remoteIsCurrent || remote.isPending);
-  const saved = localIsCurrent ? foodPages(local.data?.pages) : [];
-  const savedKeys = new Set(saved.map(foodKey));
-  const external = remoteIsCurrent
-    ? foodPages(remote.data?.pages).filter(
-        (food) => !savedKeys.has(foodKey(food)),
-      )
-    : [];
-  const searchingRemote =
-    currentQuery.length >= 2 && (!remoteIsCurrent || remote.isFetching);
+  const results = tab === "external" ? remote : local;
+  const isCurrent =
+    (tab === "external" ? externalQuery : localQuery) === currentQuery;
+  const canSearch = tab !== "external" || currentQuery.length >= 2;
+  const loading = canSearch && (!isCurrent || results.isPending);
+  const found = isCurrent ? foodPages(results.data?.pages) : [];
+  const label =
+    tab === "recent"
+      ? "recent foods"
+      : tab === "local"
+        ? "my foods"
+        : "USDA foods";
+  const warnings =
+    tab === "external" && isCurrent
+      ? (results.data?.pages.flatMap((page) => page.warnings ?? []) ?? [])
+      : [];
 
-  async function select(food: Food) {
-    if (resolving) return;
+  async function select(result: FoodSearchResult, quick = false) {
+    if (selectionInFlight.current || (quick && !result.lastEntry)) return;
+    selectionInFlight.current = true;
+    const { lastEntry, ...food } = result;
     setResolving(food.id);
+    setQuickAdding(quick);
     setError(null);
     try {
-      await onSelect(food);
+      if (quick && lastEntry) {
+        await onQuickAdd(food, lastEntry);
+        setAdded((previous) => ({
+          id: food.id,
+          name: food.name,
+          count: (previous?.count ?? 0) + 1,
+        }));
+      } else {
+        await onSelect(food, lastEntry);
+      }
     } catch (cause) {
       setError(cause);
     } finally {
       setResolving(null);
+      setQuickAdding(false);
+      selectionInFlight.current = false;
     }
   }
 
   return (
     <div className="food-search-layout">
+      <span className="sr-only" role="status" aria-atomic="true">
+        {added && (
+          <span key={`${added.id}:${added.count}`}>
+            Added {added.name} to meal.
+          </span>
+        )}
+      </span>
       <div className="food-search-input">
         <div className="search-input-wrap">
           <Search size={18} />
@@ -202,122 +304,133 @@ function FoodSearch({
             </button>
           )}
         </div>
+        <div
+          className="food-search-tabs"
+          role="tablist"
+          aria-label="Food sources"
+        >
+          {foodSearchTabs.map((item, index) => (
+            <button
+              key={item.id}
+              id={`food-tab-${item.id}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls="food-results-panel"
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => {
+                setTab(item.id);
+                setError(null);
+              }}
+              onKeyDown={(event) => {
+                const next =
+                  event.key === "ArrowRight"
+                    ? (index + 1) % foodSearchTabs.length
+                    : event.key === "ArrowLeft"
+                      ? (index + foodSearchTabs.length - 1) %
+                        foodSearchTabs.length
+                      : event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? foodSearchTabs.length - 1
+                          : null;
+                if (next === null) return;
+                event.preventDefault();
+                setTab(foodSearchTabs[next].id);
+                setError(null);
+                document
+                  .getElementById(`food-tab-${foodSearchTabs[next].id}`)
+                  ?.focus();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div
         ref={listRef}
+        id="food-results-panel"
+        role="tabpanel"
+        aria-labelledby={`food-tab-${tab}`}
         className="food-results-scroll"
         aria-label="Food results"
+        tabIndex={0}
       >
         <ErrorNotice
           error={
             error ||
-            (localIsCurrent && !local.isFetchNextPageError && local.error)
+            (isCurrent && !results.isFetchNextPageError && results.error)
           }
         />
-        {localIsCurrent && local.isError && !local.isFetchNextPageError && (
-          <Button variant="ghost" onClick={() => void local.refetch()}>
-            Retry saved foods
+        {isCurrent && results.isError && !results.isFetchNextPageError && (
+          <Button variant="ghost" onClick={() => void results.refetch()}>
+            Retry {label}
           </Button>
         )}
         <div className="list-section-title">
-          {query.trim() ? "Saved foods" : "Recent foods"}
-          {local.isFetching && <LoaderCircle size={14} className="spin" />}
+          {tab === "recent"
+            ? "Last logged portions"
+            : tab === "local"
+              ? "Custom & saved foods"
+              : "USDA FoodData Central"}
+          {canSearch && results.isFetching && (
+            <LoaderCircle size={14} className="spin" />
+          )}
         </div>
         <div className="food-list">
-          {loadingLocal ? (
+          {loading ? (
             <FoodListSkeleton
-              label={
-                currentQuery ? "Searching saved foods" : "Loading recent foods"
-              }
+              label={`${currentQuery ? "Searching" : "Loading"} ${label}`}
             />
-          ) : (
-            saved.map((food) => (
+          ) : canSearch ? (
+            found.map((food) => (
               <FoodRow
                 key={food.id}
                 food={food}
+                portion={food.lastEntry}
                 onClick={() => void select(food)}
-                busy={resolving === food.id}
+                busy={resolving === food.id && !quickAdding}
+                onQuickAdd={
+                  tab === "recent" && food.lastEntry
+                    ? () => void select(food, true)
+                    : undefined
+                }
+                quickAdding={resolving === food.id && quickAdding}
+                added={added?.id === food.id}
               />
             ))
-          )}
+          ) : null}
         </div>
-        {localIsCurrent && !loadingLocal && (
+        {canSearch && isCurrent && !loading && (
           <FoodPageLoader
             root={listRef}
-            hasMore={!!local.hasNextPage}
-            loading={local.isFetchingNextPage}
-            refreshing={local.isRefetching}
-            error={local.isFetchNextPageError ? local.error : null}
-            onLoad={local.loadMore}
-            label="saved foods"
+            hasMore={!!results.hasNextPage}
+            loading={results.isFetchingNextPage}
+            refreshing={results.isRefetching}
+            error={results.isFetchNextPageError ? results.error : null}
+            onLoad={results.loadMore}
+            label={label}
           />
         )}
-        {!loadingLocal && !local.error && !saved.length && (
+        {!canSearch ? (
           <p className="list-empty">
-            {query.trim()
-              ? "No saved matches."
-              : "Foods from saved meals appear here."}
+            Enter at least 2 characters to search the food database.
           </p>
-        )}
-        {query.trim().length >= 2 && (
-          <>
-            <div className="list-section-title">
-              More results
-              {searchingRemote && <LoaderCircle size={14} className="spin" />}
-            </div>
-            <div className="food-list">
-              {loadingRemote ? (
-                <FoodListSkeleton label="Searching USDA foods" />
-              ) : (
-                external.map((food) => (
-                  <FoodRow
-                    key={food.id}
-                    food={food}
-                    onClick={() => void select(food)}
-                    busy={resolving === food.id}
-                  />
-                ))
-              )}
-            </div>
-            {!loadingRemote &&
-              !external.length &&
-              !remote.error &&
-              !remote.data?.pages.some((page) => page.warnings?.length) && (
-                <p className="list-empty">No additional matches.</p>
-              )}
-            {remoteIsCurrent && !loadingRemote && (
-              <FoodPageLoader
-                root={listRef}
-                hasMore={!!remote.hasNextPage}
-                loading={remote.isFetchingNextPage}
-                refreshing={remote.isRefetching}
-                error={remote.isFetchNextPageError ? remote.error : null}
-                onLoad={remote.loadMore}
-                label="USDA foods"
-              />
-            )}
-            <ErrorNotice
-              error={
-                remoteIsCurrent && !remote.isFetchNextPageError && remote.error
-              }
-            />
-            {remoteIsCurrent &&
-              remote.isError &&
-              !remote.isFetchNextPageError && (
-                <Button variant="ghost" onClick={() => void remote.refetch()}>
-                  Retry USDA search
-                </Button>
-              )}
-            {remoteIsCurrent &&
-              remote.data?.pages
-                .flatMap((page) => page.warnings ?? [])
-                .map((warning) => (
-                  <p className="inline-warning" role="status" key={warning}>
-                    {warning}
-                  </p>
-                ))}
-          </>
-        )}
+        ) : !loading && !results.error && !found.length && !warnings.length ? (
+          <p className="list-empty">
+            {currentQuery
+              ? "No matches."
+              : tab === "recent"
+                ? "Foods from saved meals appear here."
+                : "Create a food or save one from the food database."}
+          </p>
+        ) : null}
+        {warnings.map((warning) => (
+          <p className="inline-warning" role="status" key={warning}>
+            {warning}
+          </p>
+        ))}
       </div>
       <div className="food-search-footer">
         <button className="create-food-row" onClick={onCustom}>
@@ -332,14 +445,30 @@ function FoodSearch({
   );
 }
 
+function mealDraftEntry(
+  food: Food,
+  values: FoodPortion,
+  id = draftId(),
+): MealEntry {
+  return {
+    id,
+    foodId: food.id,
+    food,
+    ...values,
+    ...scaleNutrients(food, values.grams),
+  };
+}
+
 function FoodDetails({
   food,
   entry,
+  initialPortion,
   onConfirm,
   draftKey,
 }: {
   food: Food;
   entry?: MealEntry;
+  initialPortion?: FoodPortion;
   draftKey: string;
   onConfirm: (values: {
     grams: number;
@@ -347,14 +476,15 @@ function FoodDetails({
     servingName: string;
   }) => void;
 }) {
+  const portion = entry ?? initialPortion;
   const matchingServing = food.servings.find(
-    (serving) => serving.name === entry?.servingName,
+    (serving) => serving.name === portion?.servingName,
   );
   const initialUnit = matchingServing ? matchingServing.id : "g";
   const [unit, setUnit] = usePageDraft(`${draftKey}/unit`, () => initialUnit);
   const [amount, setAmount] = usePageDraft(`${draftKey}/amount`, () =>
-    entry
-      ? (initialUnit === "g" ? entry.grams : entry.quantity).toString()
+    portion
+      ? (initialUnit === "g" ? portion.grams : portion.quantity).toString()
       : "100",
   );
   const selectedServing = food.servings.find((serving) => serving.id === unit);
@@ -421,8 +551,10 @@ function FoodDetails({
       )}
       <NutritionStrip values={totals} />
       <p className="muted-note">
-        Per 100 g: {number(food.calories)} kcal · P {number(food.protein, 1)} ·
-        F {number(food.fat, 1)} · C {number(food.carbs, 1)}
+        Per 100 g: {number(food.calories)} kcal ·{" "}
+        <span className="macro-protein">P {number(food.protein, 1)}</span> ·{" "}
+        <span className="macro-fat">F {number(food.fat, 1)}</span> ·{" "}
+        <span className="macro-carbs">C {number(food.carbs, 1)}</span>
       </p>
       <Button type="submit" disabled={!valid}>
         {entry ? "Update food entry" : "Add to meal"}
@@ -480,6 +612,9 @@ export function MealEditor({
     `${draftKey}/selected`,
     () => ({}),
   );
+  const [selectedPortions, setSelectedPortions] = usePageDraft<
+    Record<string, FoodPortion | undefined>
+  >(`${draftKey}/portions`, () => ({}));
   const entryId = pathname.startsWith(`${basePath}/entry/`)
     ? pathname.split("/").pop()
     : undefined;
@@ -559,22 +694,49 @@ export function MealEditor({
     back();
   }
 
-  async function selectFood(food: Food) {
-    const resolved =
-      food.source === "custom"
-        ? food
-        : await queryClient.fetchQuery({
-            queryKey: ["food-details", food.source, food.externalId || food.id],
-            queryFn: ({ signal }) =>
-              request<Food>(
-                `/api/foods/resolve?source=${food.source}&id=${encodeURIComponent(food.externalId || food.id)}`,
-                { signal },
-              ),
-            staleTime: 180 * 24 * 60 * 60_000,
-            gcTime: 24 * 60 * 60_000,
-          });
+  async function resolveFood(food: Food) {
+    return food.source === "custom"
+      ? food
+      : await queryClient.fetchQuery({
+          queryKey: ["food-details", food.source, food.externalId || food.id],
+          queryFn: ({ signal }) =>
+            request<Food>(
+              `/api/foods/resolve?source=${food.source}&id=${encodeURIComponent(food.externalId || food.id)}`,
+              { signal },
+            ),
+          staleTime: 180 * 24 * 60 * 60_000,
+          gcTime: 24 * 60 * 60_000,
+        });
+  }
+
+  async function selectFood(food: Food, portion?: FoodPortion) {
+    const resolved = await resolveFood(food);
     setSelectedFoods((previous) => ({ ...previous, [resolved.id]: resolved }));
+    setSelectedPortions((previous) => ({
+      ...previous,
+      [resolved.id]: portion,
+    }));
     navigate(route(`/food/${encodeURIComponent(resolved.id)}`));
+  }
+
+  async function quickAddFood(food: Food, portion: FoodPortion) {
+    const resolved = await resolveFood(food);
+    // Repeat the recorded mass exactly. If a serving was removed or its weight
+    // changed, use grams so the new entry still has a valid unit conversion.
+    const sameServing = resolved.servings.some(
+      (serving) =>
+        serving.name === portion.servingName &&
+        Math.abs(serving.grams * portion.quantity - portion.grams) < 0.001,
+    );
+    const values = sameServing
+      ? portion
+      : {
+          grams: portion.grams,
+          quantity: portion.grams,
+          servingName: "g",
+        };
+    const entry = mealDraftEntry(resolved, values);
+    setEntries((previous) => [...previous, entry]);
   }
 
   function addEntry(values: {
@@ -585,13 +747,7 @@ export function MealEditor({
     if (!selection) return;
     const previous =
       selection.index === undefined ? undefined : entries[selection.index];
-    const entry: MealEntry = {
-      id: previous?.id || crypto.randomUUID(),
-      foodId: selection.food.id,
-      food: selection.food,
-      ...values,
-      ...scaleNutrients(selection.food, values.grams),
-    };
+    const entry = mealDraftEntry(selection.food, values, previous?.id);
     setEntries((previousEntries) =>
       selection.index === undefined
         ? [...previousEntries, entry]
@@ -649,7 +805,10 @@ export function MealEditor({
     setError(null);
     try {
       await request(`/api/meals/${meal.id}`, { method: "DELETE" });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+        queryClient.invalidateQueries({ queryKey: ["foods", "recent"] }),
+      ]);
       discardDrafts(drafts, draftKey);
       onClose();
     } catch (cause) {
@@ -807,6 +966,7 @@ export function MealEditor({
           <FoodSearch
             draftKey={`${draftKey}/search`}
             onSelect={selectFood}
+            onQuickAdd={quickAddFood}
             onCustom={() => navigate(route("/custom-food"))}
           />
         </div>
@@ -835,6 +995,7 @@ export function MealEditor({
           key={`${selection.food.id}:${selection.index ?? "new"}`}
           draftKey={`${draftKey}/details/${pathname}`}
           food={selection.food}
+          initialPortion={selectedPortions[selection.food.id]}
           entry={
             selection.index === undefined ? undefined : entries[selection.index]
           }

@@ -79,3 +79,13 @@ For affected browser workflows, run `npm run test:e2e` after building. Playwrigh
 For documentation-only edits, check formatting and `git diff --check`; an app rebuild or database operation is unnecessary. Add meaningful regression coverage for changed calculation, persistence, authentication, or provider behavior. Review responsive screenshots for visual changes rather than adding tests that merely repeat CSS values.
 
 Keep changes scoped and preserve unrelated user edits. When using subagents, give them distinct file ownership and review their shared contracts before integrating changes. Before a requested commit, inspect the staged diff and confirm secrets and generated build/test artifacts remain excluded. Report what changed, the checks completed, and any actual limitations.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

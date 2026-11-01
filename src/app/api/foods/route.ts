@@ -1,7 +1,7 @@
 import { requireAccount } from "@/lib/auth";
 import { z } from "zod";
 import { api, json, readJson } from "@/lib/http";
-import { listFoods, saveCustomFood } from "@/lib/repository";
+import { listFoods, listRecentFoods, saveCustomFood } from "@/lib/repository";
 import { customFoodSchema } from "@/lib/validation";
 
 export const GET = api(async (request) => {
@@ -14,12 +14,14 @@ export const GET = api(async (request) => {
     .max(10_000)
     .parse(params.get("page") ?? 1);
   return json(
-    await listFoods(
-      accountId,
-      params.get("q") ?? "",
-      params.get("custom") === "true",
-      page,
-    ),
+    params.get("recent") === "true"
+      ? await listRecentFoods(accountId, params.get("q") ?? "", page)
+      : await listFoods(
+          accountId,
+          params.get("q") ?? "",
+          params.get("custom") === "true",
+          page,
+        ),
   );
 });
 

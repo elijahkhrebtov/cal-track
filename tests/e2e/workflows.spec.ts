@@ -40,7 +40,7 @@ test("browser Back and Forward preserve a meal draft through search, details, an
   const food = (await response.json()) as Food;
   const base = "/meals/new";
   await page.goto("/");
-  await page.getByRole("button", { name: "Log meal", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await expectPath(page, base);
   await expect(page).toHaveURL(
     (url) => url.searchParams.get("date") === account.today,
@@ -51,6 +51,7 @@ test("browser Back and Forward preserve a meal draft through search, details, an
   await expect(page.locator(".workflow-header h1")).toHaveText("Search foods");
   await expect(page.getByLabel("Search foods")).not.toBeFocused();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("tab", { name: "My foods", exact: true }).click();
   await page.getByLabel("Search foods").fill(customFoodInput.name);
   await page.getByRole("button", { name: /Navigation yogurt.*Custom/ }).click();
   await expectPath(page, `${base}/food/${food.id}`);
@@ -59,6 +60,9 @@ test("browser Back and Forward preserve a meal draft through search, details, an
 
   await page.goBack();
   await expectPath(page, `${base}/search`);
+  await expect(
+    page.getByRole("tab", { name: "My foods", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Search foods")).toHaveValue(
     customFoodInput.name,
   );

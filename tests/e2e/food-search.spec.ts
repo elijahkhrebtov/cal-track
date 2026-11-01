@@ -53,12 +53,13 @@ test("USDA results load on scroll, retry a failed page, and keep search and crea
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Log meal", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
   await expect(page.locator(".workflow-header h1")).toHaveText("Search foods");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const input = page.getByLabel("Search foods");
+  await page.getByRole("tab", { name: "Food database", exact: true }).click();
   const create = page.getByRole("button", {
     name: "Create custom food",
     exact: true,
@@ -78,7 +79,10 @@ test("USDA results load on scroll, retry a failed page, and keep search and crea
   const beforeCreate = await create.boundingBox();
   const bounds = await workflow.boundingBox();
   expect(bounds!.height).toBeGreaterThan(page.viewportSize()!.height * 0.9);
-  const list = page.getByLabel("Food results", { exact: true });
+  const list = page.getByRole("tabpanel", {
+    name: "Food database",
+    exact: true,
+  });
   await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
@@ -184,11 +188,12 @@ test("USDA search and selected details reuse client caches across repeated selec
     return route.fulfill({ json: food(1) });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Log meal", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
   await expect(page.locator(".workflow-header h1")).toHaveText("Search foods");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Food database", exact: true }).click();
   await page.getByLabel("Search foods").fill("  APPLE  ");
   await page
     .getByRole("button", { name: "Apple 01 USDA", exact: true })

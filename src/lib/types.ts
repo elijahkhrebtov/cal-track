@@ -23,9 +23,19 @@ export interface Food extends Nutrients {
 }
 
 export interface FoodSearchPage {
-  foods: Food[];
+  foods: FoodSearchResult[];
   nextPage: number | null;
   warnings: string[];
+}
+
+export interface FoodPortion {
+  grams: number;
+  quantity: number;
+  servingName: string;
+}
+
+export interface FoodSearchResult extends Food {
+  lastEntry?: FoodPortion;
 }
 
 export interface MealEntry extends Nutrients {

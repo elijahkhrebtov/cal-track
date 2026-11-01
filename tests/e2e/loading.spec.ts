@@ -81,7 +81,7 @@ test("custom foods shows loading without false empty states or shifting the sear
   }
 });
 
-test("saved and USDA food searches show independent loading states through debounce and requests", async ({
+test("search tabs show loading through debounce without leaking results between sources", async ({
   page,
 }) => {
   const recent = deferred();
@@ -101,7 +101,7 @@ test("saved and USDA food searches show independent loading states through debou
 
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "Log meal", exact: true }).click();
+    await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByRole("button", { name: "Add food", exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/meals/new/search");
     await expect(page.locator(".workflow-header h1")).toHaveText(
@@ -123,25 +123,28 @@ test("saved and USDA food searches show independent loading states through debou
 
     await input.fill("apple");
     await expect(
-      page.getByRole("status", { name: "Searching saved foods", exact: true }),
+      page.getByRole("status", { name: "Searching recent foods", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("status", { name: "Searching USDA foods", exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: /Test yogurt.*Custom/ }),
     ).toHaveCount(0);
-    await expect(
-      page.getByText("No saved matches.", { exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByText("No additional matches.", { exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByText("No matches.", { exact: true })).toHaveCount(0);
 
     local.resolve();
     await expect(
       page.getByRole("button", { name: /Apple.*Custom/ }),
     ).toBeVisible();
+    await page.getByRole("tab", { name: "My foods", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: /Apple.*Custom/ }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "Food database", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: /Apple.*Custom/ }),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("status", { name: "Searching USDA foods", exact: true }),
     ).toBeVisible();
@@ -149,9 +152,7 @@ test("saved and USDA food searches show independent loading states through debou
     expect(Math.abs(pendingBounds!.y - recentBounds!.y)).toBeLessThan(1);
     await page.screenshot({ path: "test-results/food-search-loading.png" });
     remote.resolve();
-    await expect(
-      page.getByText("No additional matches.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("No matches.", { exact: true })).toBeVisible();
     const readyBounds = await input.boundingBox();
     expect(Math.abs(readyBounds!.y - recentBounds!.y)).toBeLessThan(1);
   } finally {
@@ -178,8 +179,8 @@ test("day requests show card placeholders until the real data arrives", async ({
       page.getByRole("heading", { name: "Calories", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Log meal", exact: true }),
-    ).toBeDisabled();
+      page.getByRole("button", { name: "Add", exact: true }),
+    ).toHaveCount(0);
     await page.screenshot({
       path: "test-results/day-loading.png",
       fullPage: true,
@@ -192,7 +193,7 @@ test("day requests show card placeholders until the real data arrives", async ({
       page.getByRole("status", { name: "Loading day", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Log meal", exact: true }),
+      page.getByRole("button", { name: "Add", exact: true }),
     ).toBeEnabled();
   } finally {
     day.resolve();

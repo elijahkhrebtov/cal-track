@@ -1,17 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gte,
-  ilike,
-  isNotNull,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { dayCompletions, foods, meals, measurements } from "@/lib/db/schema";
@@ -247,6 +236,85 @@ export async function getDashboard(
   };
 }
 
+function foodSearchCondition(query: string) {
+  const escaped = query.replace(/[\\%_]/g, "\\$&");
+  return or(
+    ilike(foods.name, `%${escaped}%`),
+    ilike(foods.brand, `%${escaped}%`),
+    sql`word_similarity(lower(${query}), lower(${foods.name})) > 0.3`,
+  )!;
+}
+
+export async function listRecentFoods(
+  accountId: string,
+  query: string,
+  page = 1,
+) {
+  const q = query.trim().slice(0, 120);
+  const entry = sql`logged_entry.value`;
+  const foodId = sql<string>`${entry}->>'foodId'`;
+  // Deduplicate before paging. Meal dates define the latest intake; editing an
+  // older meal must not replace a later day's portion. Last occurrence wins
+  // when the same food appears more than once in a meal.
+  const latest = getDb()
+    .selectDistinctOn([foodId], {
+      foodId: foodId.as("food_id"),
+      grams: sql<number>`(${entry}->>'grams')::double precision`.as("grams"),
+      quantity: sql<number>`(${entry}->>'quantity')::double precision`.as(
+        "quantity",
+      ),
+      servingName: sql<string>`${entry}->>'servingName'`.as("serving_name"),
+      date: meals.date,
+      createdAt: meals.createdAt,
+      position: sql<number>`logged_entry.position`.as("position"),
+    })
+    .from(meals)
+    .crossJoin(
+      sql`jsonb_array_elements(${meals.entries}) with ordinality as logged_entry(value, position)`,
+    )
+    .where(eq(meals.accountId, accountId))
+    .orderBy(
+      foodId,
+      desc(meals.date),
+      desc(meals.createdAt),
+      desc(meals.id),
+      desc(sql`logged_entry.position`),
+    )
+    .as("latest_entries");
+  const rows = await getDb()
+    .select({
+      food: foods,
+      grams: latest.grams,
+      quantity: latest.quantity,
+      servingName: latest.servingName,
+    })
+    .from(foods)
+    .innerJoin(latest, eq(foods.id, sql`${latest.foodId}::uuid`))
+    .where(
+      and(
+        eq(foods.accountId, accountId),
+        eq(foods.archived, false),
+        q ? foodSearchCondition(q) : undefined,
+      ),
+    )
+    .orderBy(
+      desc(latest.date),
+      desc(latest.createdAt),
+      desc(latest.position),
+      asc(foods.id),
+    )
+    .limit(21)
+    .offset((page - 1) * 20);
+  return {
+    foods: rows.slice(0, 20).map(({ food, grams, quantity, servingName }) => ({
+      ...foodDto(food),
+      lastEntry: { grams, quantity, servingName },
+    })),
+    nextPage: rows.length > 20 ? page + 1 : null,
+    warnings: [],
+  };
+}
+
 export async function listFoods(
   accountId: string,
   query: string,
@@ -259,17 +327,9 @@ export async function listFoods(
     eq(foods.archived, false),
   ];
   if (customOnly) conditions.push(eq(foods.source, "custom"));
-  if (!q && !customOnly) conditions.push(isNotNull(foods.lastUsedAt));
   if (q) {
     // Escape LIKE metacharacters, retaining indexed trigram fuzzy matches for misspellings.
-    const escaped = q.replace(/[\\%_]/g, "\\$&");
-    conditions.push(
-      or(
-        ilike(foods.name, `%${escaped}%`),
-        ilike(foods.brand, `%${escaped}%`),
-        sql`word_similarity(lower(${q}), lower(${foods.name})) > 0.3`,
-      )!,
-    );
+    conditions.push(foodSearchCondition(q));
   }
   const rows = await getDb()
     .select()

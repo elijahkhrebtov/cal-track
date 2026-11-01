@@ -11,10 +11,16 @@
   --subtle: #6b6b6b;
   --green: #4ade80;
   --green-bright: #6ee7a0;
-  --low: #909090;
   --caution: #d9bb87;
-  --warning: #e79e60;
   --danger: #e67f73;
+  --calorie-low: #9e9e9e;
+  --calorie-green: var(--green);
+  --calorie-caution: #ffbd4a;
+  --calorie-warning: #ff8a24;
+  --calorie-danger: #ff4d5e;
+  --macro-protein: #b8a0dc;
+  --macro-fat: #d2b77e;
+  --macro-carbs: #8fc7a3;
   --radius: 18px;
 }
 
@@ -219,37 +225,41 @@ input[type="date"] {
 .align-start {
   align-self: flex-start;
 }
-.text-green,
-.tone-green {
+.text-green {
   color: var(--green);
 }
+.tone-green {
+  color: var(--calorie-green);
+}
 .tone-low {
-  color: var(--low);
+  color: var(--calorie-low);
 }
 .tone-caution {
-  color: var(--caution);
+  color: var(--calorie-caution);
 }
 .tone-warning {
-  color: var(--warning);
+  color: var(--calorie-warning);
 }
-.text-danger,
-.tone-danger {
+.text-danger {
   color: var(--danger);
 }
+.tone-danger {
+  color: var(--calorie-danger);
+}
 .bg-low {
-  background: var(--low);
+  background: var(--calorie-low);
 }
 .bg-green {
-  background: var(--green);
+  background: var(--calorie-green);
 }
 .bg-caution {
-  background: var(--caution);
+  background: var(--calorie-caution);
 }
 .bg-warning {
-  background: var(--warning);
+  background: var(--calorie-warning);
 }
 .bg-danger {
-  background: var(--danger);
+  background: var(--calorie-danger);
 }
 
 .app-shell {
@@ -258,7 +268,7 @@ input[type="date"] {
   padding: env(safe-area-inset-top) 20px 0;
 }
 .app-header {
-  height: 89px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -297,7 +307,7 @@ input[type="date"] {
 }
 .header-error {
   position: absolute;
-  top: 70px;
+  top: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 10;
@@ -306,14 +316,14 @@ input[type="date"] {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding-bottom: calc(116px + env(safe-area-inset-bottom));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
 .date-navigation {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 12px -5px 1px;
-  padding: 10px 0 12px;
+  margin: 4px -5px 0;
+  padding: 2px 0;
 }
 .date-navigation .button {
   color: #adadad;
@@ -322,13 +332,18 @@ input[type="date"] {
   opacity: 0.23;
 }
 .date-picker {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 42px;
   text-align: center;
   position: relative;
   cursor: pointer;
   padding: 0 16px;
 }
 .date-primary {
-  font-size: 20px;
+  font-size: 18px;
+  line-height: 1.2;
   font-weight: 600;
   letter-spacing: -0.4px;
   display: flex;
@@ -341,9 +356,10 @@ input[type="date"] {
 }
 .date-secondary {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--muted);
-  margin-top: 3px;
+  margin-top: 2px;
 }
 .date-picker input {
   position: absolute;
@@ -505,7 +521,7 @@ input[type="date"] {
   margin-top: 20px;
 }
 .macro-label {
-  color: #b3b3b3;
+  color: var(--macro-color);
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -518,13 +534,18 @@ input[type="date"] {
   background: var(--macro-color);
 }
 .macro-protein {
-  --macro-color: #4ade80;
+  --macro-color: var(--macro-protein);
 }
 .macro-fat {
-  --macro-color: #d2b77e;
+  --macro-color: var(--macro-fat);
 }
 .macro-carbs {
-  --macro-color: #a0b4c6;
+  --macro-color: var(--macro-carbs);
+}
+.macro-protein,
+.macro-fat,
+.macro-carbs {
+  color: var(--macro-color);
 }
 .macro-value {
   margin: 8px 0 11px;
@@ -541,7 +562,8 @@ input[type="date"] {
 }
 .macro-value > span {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--macro-color);
+  opacity: 0.8;
 }
 .macro-value small {
   font-size: 10px;
@@ -627,7 +649,7 @@ input[type="date"] {
 }
 .macro-line b {
   font-weight: 400;
-  color: #c2c2c2;
+  color: inherit;
   margin-left: 2px;
 }
 .macro-line .macro-unit {
@@ -691,7 +713,8 @@ input[type="date"] {
 }
 .chart-legend {
   display: flex;
-  gap: 13px;
+  flex-wrap: wrap;
+  gap: 7px 13px;
   color: var(--muted);
   font-size: 10px;
   margin-top: 14px;
@@ -705,32 +728,23 @@ input[type="date"] {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--green);
-}
-.legend-surplus {
-  background: var(--danger);
-}
-.chart-legend .chart-range {
-  margin-left: auto;
-  font-size: 9px;
 }
 .history-chart {
   height: 190px;
   position: relative;
   margin-top: 9px;
-  padding-left: 16px;
+  padding-left: 38px;
 }
 .chart-grid-line {
   position: absolute;
   border-top: 1px solid #383838;
-  top: 73px;
-  left: 19px;
+  left: 38px;
   right: 0;
 }
-.chart-zero-label {
+.chart-axis-label {
   position: absolute;
-  top: 66px;
-  left: 0;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
   color: var(--subtle);
   font-size: 9px;
 }
@@ -762,18 +776,16 @@ input[type="date"] {
 }
 .chart-bar {
   position: absolute;
+  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
   max-width: 27px;
-  border-radius: 4px;
-}
-.chart-bar.chart-excluded {
-  opacity: 0.4;
+  border-radius: 4px 4px 0 0;
 }
 .chart-empty-mark {
   position: absolute;
-  top: 62px;
+  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   font-size: 14px;
@@ -962,37 +974,6 @@ input[type="date"] {
   margin: 0 8px;
   color: #737373;
 }
-.dashboard-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--subtle);
-  font-size: 9px;
-  letter-spacing: 0.2px;
-  padding: 9px 0;
-}
-.dashboard-footer .status-dot {
-  width: 4px;
-  height: 4px;
-}
-.log-meal-fab {
-  position: fixed;
-  bottom: calc(22px + env(safe-area-inset-bottom));
-  right: max(20px, calc((100vw - 620px) / 2));
-  z-index: 20;
-  border-radius: 17px;
-  height: 55px;
-  min-height: 55px;
-  padding: 0 19px 0 16px;
-  box-shadow:
-    0 6px 28px rgb(0 0 0 / 40%),
-    0 0 0 5px var(--background);
-  gap: 8px;
-}
-.log-meal-fab span {
-  font-size: 13px;
-}
 .skeleton {
   border-radius: 6px;
   background: #303030;
@@ -1087,6 +1068,32 @@ input[type="date"] {
 .food-search-input {
   padding: 18px 22px;
   flex-shrink: 0;
+}
+.food-search-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 14px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+.food-search-tabs button {
+  min-height: 40px;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+}
+.food-search-tabs button[aria-selected="true"] {
+  color: var(--green);
+  background: #323232;
+}
+.food-portion {
+  color: var(--foreground);
 }
 .food-results-scroll {
   flex: 1;
@@ -1478,6 +1485,18 @@ input[type="date"] {
   font-size: 9px;
   color: var(--muted);
 }
+.nutrition-strip > :is(.macro-protein, .macro-fat, .macro-carbs) > span {
+  color: var(--macro-color);
+  opacity: 0.8;
+}
+.macro-field .field-label,
+.macro-field .input {
+  color: var(--macro-color);
+}
+.macro-field .field-hint {
+  color: var(--macro-color);
+  opacity: 0.8;
+}
 .entry-list {
   margin-top: -13px;
 }
@@ -1580,6 +1599,24 @@ input[type="date"] {
 }
 .food-row:last-child {
   border-bottom: 0;
+}
+.food-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #313131;
+}
+.food-quick-row:last-child {
+  border-bottom: 0;
+}
+.food-quick-row > .food-row {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+.food-quick-add {
+  flex-shrink: 0;
+  color: var(--green);
 }
 .food-row:hover .food-name {
   color: var(--green);
@@ -1727,14 +1764,10 @@ input[type="date"] {
     padding-right: 28px;
   }
   .app-header {
-    height: 100px;
+    height: 64px;
   }
   .dashboard-main {
     gap: 18px;
-  }
-  .date-navigation {
-    margin-top: 19px;
-    margin-bottom: 4px;
   }
   .card {
     padding: 23px 25px;
@@ -1792,9 +1825,6 @@ input[type="date"] {
   .chart-legend {
     font-size: 11px;
   }
-  .chart-legend .chart-range {
-    font-size: 10px;
-  }
   .chart-note {
     font-size: 10px;
   }
@@ -1831,9 +1861,6 @@ input[type="date"] {
   }
   .weight-update-button > span:nth-child(2) > span {
     font-size: 11px;
-  }
-  .log-meal-fab {
-    right: max(28px, calc((100vw - 604px) / 2));
   }
   .sheet {
     bottom: 24px;
@@ -1905,9 +1932,6 @@ input[type="date"] {
   }
   .chart-columns {
     gap: 8px;
-  }
-  .chart-legend .chart-range {
-    display: none;
   }
   .summary-stat + .summary-stat {
     padding-left: 14px;

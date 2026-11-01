@@ -22,7 +22,7 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
     page.getByRole("heading", { name: "Calories", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Next day" })).toBeDisabled();
-  await page.getByRole("button", { name: "Log meal", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: "Custom food", exact: true }).click();
   await page.getByLabel("Food name").fill(foodInput.name);
   await page
@@ -99,10 +99,11 @@ test("meal creation, quantity editing, explicit save/discard, library edits, and
   ).json()) as Dashboard;
   expect(updated.meals[0].calories).toBe(90); // Original 60 kcal/100g snapshot.
 
-  await page.getByRole("button", { name: "Log meal", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByLabel("Meal name")).toHaveValue("Meal 2");
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page.getByLabel("Search foods")).not.toBeFocused();
+  await page.getByRole("tab", { name: "My foods", exact: true }).click();
   await page.getByLabel("Search foods").fill("Test yogurt");
   await page.getByRole("button", { name: /Test yogurt.*Custom/ }).click();
   await page.getByRole("button", { name: "Add to meal" }).click();

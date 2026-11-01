@@ -514,49 +514,60 @@ function HistoryChart({
       }
     );
   });
-  const chartMaximum = Math.max(
-    500,
-    ...days
-      .filter((day) => day.calories > 0 || day.completed)
-      .map((day) => Math.abs(day.maintenance - day.calories)),
-  );
+  const chartMaximum =
+    Math.ceil(Math.max(1_000, ...days.map((day) => day.calories)) / 1_000) *
+    1_000;
   return (
-    <section className="card chart-card" aria-labelledby="balance-heading">
+    <section className="card chart-card" aria-labelledby="history-heading">
       <div className="section-heading">
-        <h2 id="balance-heading">Energy balance</h2>
+        <h2 id="history-heading">Daily calories</h2>
         <span className="section-meta">kcal / day</span>
       </div>
       <div className="chart-legend">
         <span>
-          <i className="legend-dot" />
-          Deficit
+          <i className="legend-dot bg-low" />
+          Low
         </span>
         <span>
-          <i className="legend-dot legend-surplus" />
-          Surplus
+          <i className="legend-dot bg-green" />
+          On target
         </span>
-        <span className="chart-range">
-          {formatDate(days[0].date, { day: "numeric", month: "short" })} —{" "}
-          {formatDate(date, { day: "numeric", month: "short" })}
+        <span>
+          <i className="legend-dot bg-caution" />
+          Above target
+        </span>
+        <span>
+          <i className="legend-dot bg-warning" />
+          Near maintenance
+        </span>
+        <span>
+          <i className="legend-dot bg-danger" />
+          Maintenance+
         </span>
       </div>
       <div className="history-chart">
-        <div className="chart-zero-label">0</div>
-        <div className="chart-grid-line" />
+        {[chartMaximum, chartMaximum / 2, 0].map((value, index) => (
+          <div
+            className="chart-grid-line"
+            style={{ top: `${index * 73}px` }}
+            key={value}
+            aria-hidden="true"
+          >
+            <span className="chart-axis-label">{number(value)}</span>
+          </div>
+        ))}
         <div className="chart-columns">
           {days.map((day) => {
-            const deficit = day.maintenance - day.calories;
             const hasData = day.calories > 0 || day.completed;
             const tone = calorieTone(day.calories, day);
-            const height = hasData
-              ? Math.max(3, (Math.abs(deficit) / chartMaximum) * 64)
-              : 0;
-            const label = `${formatDate(day.date, { day: "numeric", month: "long" })}: ${hasData ? `${number(day.calories)} kcal, ${number(Math.abs(deficit))} kcal ${deficit >= 0 ? "deficit" : "surplus"}${day.eligible ? "" : ", excluded from average"}` : "no intake logged"}`;
+            const height = (day.calories / chartMaximum) * 100;
+            const label = `${formatDate(day.date, { day: "numeric", month: "long" })}: ${hasData ? `${number(day.calories)} kcal${!day.eligible && day.date !== date ? ", excluded from average" : ""}` : "no intake logged"}`;
             return (
               <button
                 className={`chart-column ${day.date === date ? "chart-selected" : ""}`}
                 key={day.date}
                 disabled={day.date < startDate}
+                aria-current={day.date === date ? "date" : undefined}
                 aria-label={label}
                 title={label}
                 onClick={() => onSelect(day.date)}
@@ -565,13 +576,11 @@ function HistoryChart({
                   <span className="chart-empty-mark" hidden={hasData}>
                     —
                   </span>
-                  {hasData && (
+                  {day.calories > 0 && (
                     <span
-                      className={`chart-bar bg-${tone} ${!day.eligible && day.date !== date ? "chart-excluded" : ""}`}
+                      className={`chart-bar bg-${tone}`}
                       style={{
-                        height: `${height}px`,
-                        bottom:
-                          deficit >= 0 ? "50%" : `calc(50% - ${height}px)`,
+                        height: `${height}%`,
                       }}
                     />
                   )}
@@ -588,7 +597,9 @@ function HistoryChart({
         </div>
       </div>
       <p className="chart-note">
-        Past 7 days + selected day. Faded bars are excluded from averages.
+        {formatDate(days[0].date, { day: "numeric", month: "short" })} —{" "}
+        {formatDate(date, { day: "numeric", month: "short" })}. Tap a day to
+        view.
       </p>
     </section>
   );
@@ -824,23 +835,10 @@ function DailyDashboard({ bootstrap }: { bootstrap: Bootstrap }) {
                   </span>
                   <ChevronRight size={18} />
                 </button>
-                <div className="dashboard-footer">
-                  <span className="status-dot" />
-                  Tashkent · kcal · metric
-                </div>
               </>
             )
           )}
         </main>
-        <Button
-          className="log-meal-fab"
-          aria-label="Log meal"
-          disabled={!data}
-          onClick={() => openMeal()}
-        >
-          <Plus size={25} />
-          <span>Log meal</span>
-        </Button>
       </div>
       {activeEditor && data && (
         <MealEditor
